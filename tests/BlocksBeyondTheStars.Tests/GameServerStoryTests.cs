@@ -52,13 +52,13 @@ public sealed class GameServerStoryTests : IDisposable
     }
 
     [Fact]
-    public void Fresh_world_defaults_to_vega_protocol_and_reveals_the_first_beat()
+    public void Fresh_world_defaults_to_voidcraft_awakening_and_reveals_the_first_beat()
     {
         Run("fresh", server =>
         {
             var snap = server.StorySnapshot;
-            Assert.Equal("vega_protocol", snap.StoryId);
-            Assert.Equal(1, snap.BeatsRevealed); // B0 ("Systems online") at threshold 0
+            Assert.Equal("voidcraft_awakening", snap.StoryId);
+            Assert.Equal(1, snap.BeatsRevealed); // B0 ("No sky in memory") at threshold 0
             Assert.False(snap.Defeated);
         });
     }
@@ -75,7 +75,7 @@ public sealed class GameServerStoryTests : IDisposable
 
             var snap = server.StorySnapshot;
             Assert.Equal(5, snap.Fragments);
-            Assert.Equal(3, snap.BeatsRevealed); // thresholds 0,6,14 crossed; 24 not yet
+            Assert.Equal(4, snap.BeatsRevealed); // thresholds 0,3,8,15 crossed; 24 not yet
         });
     }
 
@@ -102,8 +102,8 @@ public sealed class GameServerStoryTests : IDisposable
 
             var snap = server.StorySnapshot;
             Assert.Equal(100, snap.Kills);
-            // capped at 40 -> progress 40 -> beats at thresholds 0,6,14,24,36 (B5=50 unreached) = 5
-            Assert.Equal(5, snap.BeatsRevealed);
+            // capped at 40 -> progress 40 -> beats at thresholds 0,3,8,15,24,36 (B6=50 unreached) = 6
+            Assert.Equal(6, snap.BeatsRevealed);
         });
     }
 
@@ -131,7 +131,7 @@ public sealed class GameServerStoryTests : IDisposable
                 server.RecordStoryFragmentForTest("f" + i);
             }
 
-            server.SetActiveStoryForTest("vega_protocol"); // re-select resets
+            server.SetActiveStoryForTest("vega_protocol");
             var snap = server.StorySnapshot;
             Assert.Equal("vega_protocol", snap.StoryId);
             Assert.Equal(0, snap.Fragments);
@@ -157,7 +157,7 @@ public sealed class GameServerStoryTests : IDisposable
         Run("persist", server =>
         {
             var snap = server.StorySnapshot;
-            Assert.Equal("vega_protocol", snap.StoryId);
+            Assert.Equal("voidcraft_awakening", snap.StoryId);
             Assert.Equal(4, snap.Fragments);
             Assert.Equal(1, snap.Kills);
         });

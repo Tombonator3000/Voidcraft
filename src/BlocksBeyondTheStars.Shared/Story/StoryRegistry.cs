@@ -7,16 +7,16 @@ using System.Collections.Generic;
 namespace BlocksBeyondTheStars.Shared.Story;
 
 /// <summary>
-/// The installed story packs. The engine is story-agnostic; packs are added here (and later loaded from
-/// <c>data/stories/&lt;id&gt;/</c>). The first pack is <b>"The VEGA Protocol"</b> — the SPS grundstory whose
-/// canon + beat agenda live in <c>docs/developer/LORE_STRUCTURE.md</c>. The beat <see cref="StoryBeat.TextKey"/>s are the
-/// B0–B12 arc from that doc; their bilingual text is authored later (workstream W-A). Thresholds are tunable
-/// (plan §9 numeric tuning) but must stay monotonic.
+/// Built-in fallbacks for the installed story packs. Runtime content is loaded from
+/// <c>data/stories/&lt;id&gt;/</c>; these definitions keep a fresh world playable when that data is unavailable.
 /// </summary>
 public static class StoryRegistry
 {
     /// <summary>The default/active pack id for a fresh world.</summary>
-    public const string DefaultStoryId = "vega_protocol";
+    public const string DefaultStoryId = "voidcraft_awakening";
+
+    /// <summary>The original Blocks Beyond the Stars campaign, retained as an optional pack.</summary>
+    public const string VegaProtocolStoryId = "vega_protocol";
 
     /// <summary>The reserved id that disables the story entirely (pure sandbox).</summary>
     public const string NoneStoryId = "none";
@@ -24,13 +24,14 @@ public static class StoryRegistry
     private static readonly Dictionary<string, StoryDefinition> Packs =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            [DefaultStoryId] = BuildVegaProtocol(),
+            [DefaultStoryId] = BuildVoidcraftAwakening(),
+            [VegaProtocolStoryId] = BuildVegaProtocol(),
         };
 
     /// <summary>All installed packs (excludes the "none" sentinel).</summary>
     public static IReadOnlyCollection<StoryDefinition> All => Packs.Values;
 
-    /// <summary>The default pack ("vega_protocol").</summary>
+    /// <summary>The default pack for a fresh Voidcraft world.</summary>
     public static StoryDefinition Default => Packs[DefaultStoryId];
 
     /// <summary>True if the id is a real installed pack (not empty and not the "none" sentinel).</summary>
@@ -52,40 +53,84 @@ public static class StoryRegistry
         return false;
     }
 
-    private static StoryDefinition BuildVegaProtocol() => new()
+    private static StoryDefinition BuildVoidcraftAwakening() => new()
     {
         Id = DefaultStoryId,
+        NameKey = "story.voidcraft_awakening.name",
+        FragmentWeight = 3,
+        KillWeight = 1,
+        MilestoneWeight = 2,
+        KillContributionCap = 40,
+        FinaleRevealTextKey = "story.voidcraft.guardian_revealed",
+        FinaleResolvedTextKey = "story.voidcraft.finale_resolved",
+        FinaleSystemNameKey = "story.voidcraft.guardian_system",
+        InsightUnlockBeatCount = 6,
+        CompanionWardTextKey = "story.voidcraft.insight.companion_ward",
+        ShapeAnomalyTextKey = "story.voidcraft.insight.shape_anomaly",
+        Beats = new List<StoryBeat>
+        {
+            VoidcraftBeat(0,  "No sky in memory",       0,   0),
+            VoidcraftBeat(1,  "The signal below",       3,   1),
+            VoidcraftBeat(2,  "The first seal",         8,   1),
+            VoidcraftBeat(3,  "The same hand",          15,  1),
+            VoidcraftBeat(4,  "World-shells",            24,  1),
+            VoidcraftBeat(5,  "The Veyl",                36,  1),
+            VoidcraftBeat(6,  "The Sleeper signal",      50,  1),
+            VoidcraftBeat(7,  "The silence",             66,  1),
+            VoidcraftBeat(8,  "The waking lattice",      84,  1),
+            VoidcraftBeat(9,  "What you are",            104, 1),
+            VoidcraftBeat(10, "Not the first",           126, 1),
+            VoidcraftBeat(11, "The Black Anchor",        150, 1),
+            VoidcraftBeat(12, "The choice",              176, 1),
+        },
+    };
+
+    private static StoryDefinition BuildVegaProtocol() => new()
+    {
+        Id = VegaProtocolStoryId,
         NameKey = "story.vega_protocol.name",
         // progress = fragments*3 + min(kills,40)*1 + milestones*2
         FragmentWeight = 3,
         KillWeight = 1,
         MilestoneWeight = 2,
         KillContributionCap = 40,
+        FinaleRevealTextKey = "story.vega.guardian_revealed",
+        FinaleResolvedTextKey = "story.vega.finale_resolved",
+        FinaleSystemNameKey = "story.vega.guardian_system",
+        InsightUnlockBeatCount = 6,
+        CompanionWardTextKey = "story.vega.insight.companion_ward",
+        ShapeAnomalyTextKey = "story.vega.insight.shape_anomaly",
         // Beats pay +1 knowledge each (was +3): the arc alone used to out-earn the whole research
         // ladder's knowledge ceiling, trivialising the blueprint gate (#767).
         Beats = new List<StoryBeat>
         {
-            Beat(0,  "Systems online",        0,   0),
-            Beat(1,  "A familiar signature",  6,   1),
-            Beat(2,  "The Service",           14,  1),
-            Beat(3,  "Not scattered — erased", 24, 1),
-            Beat(4,  "Ours, once",            36,  1),
-            Beat(5,  "The Guardian",          50,  1),
-            Beat(6,  "The verdict",           66,  1),
-            Beat(7,  "Her stand",             84,  1),
-            Beat(8,  "The thought-arcs",      104, 1),
-            Beat(9,  "What you are",          126, 1),  // the clone reveal
-            Beat(10, "Many minds",            150, 1),
-            Beat(11, "It still sleeps",       176, 1),  // locates the dormant Guardian system
-            Beat(12, "The choice",            204, 1),  // finale opens
+            VegaBeat(0,  "Systems online",        0,   0),
+            VegaBeat(1,  "A familiar signature",  6,   1),
+            VegaBeat(2,  "The Service",           14,  1),
+            VegaBeat(3,  "Not scattered — erased", 24, 1),
+            VegaBeat(4,  "Ours, once",            36,  1),
+            VegaBeat(5,  "The Guardian",          50,  1),
+            VegaBeat(6,  "The verdict",           66,  1),
+            VegaBeat(7,  "Her stand",             84,  1),
+            VegaBeat(8,  "The thought-arcs",      104, 1),
+            VegaBeat(9,  "What you are",          126, 1),  // the clone reveal
+            VegaBeat(10, "Many minds",            150, 1),
+            VegaBeat(11, "It still sleeps",       176, 1),  // locates the dormant Guardian system
+            VegaBeat(12, "The choice",            204, 1),  // finale opens
         },
     };
 
-    private static StoryBeat Beat(int index, string title, int threshold, int knowledge) => new()
+    private static StoryBeat VoidcraftBeat(int index, string title, int threshold, int knowledge)
+        => Beat(index, title, "story.voidcraft.beat", threshold, knowledge);
+
+    private static StoryBeat VegaBeat(int index, string title, int threshold, int knowledge)
+        => Beat(index, title, "story.vega.beat", threshold, knowledge);
+
+    private static StoryBeat Beat(int index, string title, string textKeyPrefix, int threshold, int knowledge) => new()
     {
         Index = index,
         Title = title,
-        TextKey = "story.vega.beat" + index.ToString("00", System.Globalization.CultureInfo.InvariantCulture),
+        TextKey = textKeyPrefix + index.ToString("00", System.Globalization.CultureInfo.InvariantCulture),
         Threshold = threshold,
         KnowledgeReward = knowledge,
     };

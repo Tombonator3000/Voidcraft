@@ -11,7 +11,7 @@ namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// The uGUI main menu (M27 UI rework): the sci-fi mockup look built in code via <see cref="UiKit"/>
-    /// — a SYSTEM CHECK panel, the BLOCKS BEYOND THE STARS title, framed cyan menu buttons wired to the shell, a
+    /// — a SYSTEM CHECK panel, the VOIDCRAFT title, framed cyan menu buttons wired to the shell, a
     /// tagline and the version. Shown over the animated <see cref="MenuBackground"/>. AppShell spawns
     /// it on the MainMenu phase and destroys it on leaving. Decorative panels (world/server info,
     /// community bar) + editable host/port land in a follow-up.
@@ -38,7 +38,7 @@ namespace BlocksBeyondTheStars.Client
             }
 
             // --- Title ---
-            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "BLOCKS BEYOND THE STARS", 64);
+            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "VOIDCRAFT", 72);
             UiKit.AddText(root, 1700f, 44f, 180f, 24f, "VER. " + AppShell.Version, 16, UiKit.CyanDim, TextAnchor.MiddleRight);
 
             // Connect-to-server dialog (built below; the JOIN button reveals it). Captured by the button.

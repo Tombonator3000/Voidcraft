@@ -23,8 +23,8 @@ internal static class SplashLocalization
 {
     // Must match Unity Player Settings (client/ProjectSettings/ProjectSettings.asset) — these compose the
     // persistentDataPath where client_settings.json lives.
-    private const string CompanyName = "JuMaVe Games";
-    private const string ProductName = "Blocks Beyond the Stars";
+    private const string CompanyName = "Voidcraft Project";
+    private const string ProductName = "Voidcraft";
 
     // The game's data folder sits next to the exe (and next to the launcher) — derived from the exe name.
     private const string DataFolderName = "BlocksBeyondTheStars_Data";

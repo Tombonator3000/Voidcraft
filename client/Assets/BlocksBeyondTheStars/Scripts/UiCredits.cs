@@ -27,7 +27,8 @@ namespace BlocksBeyondTheStars.Client
             // and the body is clipped to this region, so the two can never overlap regardless of text length.
             float bodyY = py + 110f;
             float bodyH = ph - 200f;                 // leaves a gap above the Back button row
-            BuildBodyScroll(root, px + 40f, bodyY, pw - 80f, bodyH, shell.L("ui.credits.body"));
+            string credits = shell.L("ui.credits.voidcraft") + "\n\n" + shell.L("ui.credits.body");
+            BuildBodyScroll(root, px + 40f, bodyY, pw - 80f, bodyH, credits);
 
             UiKit.AddButton(root, px + 40, py + ph - 76, 220, 52, shell.L("ui.menu.back"), () => shell.CloseCredits());
 

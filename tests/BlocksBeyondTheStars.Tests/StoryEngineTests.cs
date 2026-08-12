@@ -98,10 +98,10 @@ public class StoryEngineTests
     }
 
     [Fact]
-    public void Vega_protocol_pack_has_ordered_monotonic_thresholds()
+    public void Default_voidcraft_pack_has_ordered_monotonic_thresholds()
     {
         var def = StoryRegistry.Default;
-        Assert.Equal("vega_protocol", def.Id);
+        Assert.Equal("voidcraft_awakening", def.Id);
         Assert.NotEmpty(def.Beats);
         Assert.Equal(0, def.Beats[0].Threshold);
         for (int i = 0; i < def.Beats.Count; i++)
@@ -116,7 +116,7 @@ public class StoryEngineTests
     }
 
     [Fact]
-    public void Vega_protocol_reveals_all_beats_under_enough_progress()
+    public void Default_voidcraft_pack_reveals_all_beats_under_enough_progress()
     {
         var def = StoryRegistry.Default;
         var s = new StoryState { StoryId = def.Id, FragmentsFound = 1000 };
@@ -128,6 +128,7 @@ public class StoryEngineTests
     [Fact]
     public void Registry_lookup_and_none_sentinel()
     {
+        Assert.True(StoryRegistry.IsStoryActive("voidcraft_awakening"));
         Assert.True(StoryRegistry.IsStoryActive("vega_protocol"));
         Assert.False(StoryRegistry.IsStoryActive("none"));
         Assert.False(StoryRegistry.IsStoryActive(""));

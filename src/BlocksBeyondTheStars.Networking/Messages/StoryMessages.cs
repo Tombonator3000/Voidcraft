@@ -12,7 +12,7 @@ namespace BlocksBeyondTheStars.Networking.Messages;
 /// </summary>
 public sealed class StoryStateMessage
 {
-    /// <summary>The active story pack id (e.g. "vega_protocol"), or "none" when disabled.</summary>
+    /// <summary>The active story pack id (e.g. "voidcraft_awakening"), or "none" when disabled.</summary>
     public string StoryId { get; set; } = string.Empty;
 
     /// <summary>False when no story is active (the "none" sandbox) — the UI hides the meter/tab.</summary>

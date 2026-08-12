@@ -474,9 +474,10 @@ namespace BlocksBeyondTheStars.Client.EditorTools
         /// </summary>
         public static void EnsureAppIcon()
         {
-            PlayerSettings.companyName = "JuMaVe Games";
-            // Display title of the game; "BlocksBeyondTheStars" stays the technical codename (exe, namespaces, paths).
-            PlayerSettings.productName = "Blocks Beyond the Stars";
+            PlayerSettings.companyName = "Voidcraft Project";
+            // Display title of the game; "BlocksBeyondTheStars" stays the technical codename (exe, namespaces,
+            // and Unity data-folder name).
+            PlayerSettings.productName = "Voidcraft";
 
             string absPath = Path.Combine(Application.dataPath, "BlocksBeyondTheStars", "Icon", "app_icon.png");
             if (!File.Exists(absPath))

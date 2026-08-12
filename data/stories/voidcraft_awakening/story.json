@@ -1,0 +1,91 @@
+{
+  "id": "voidcraft_awakening",
+  "nameKey": "story.voidcraft_awakening.name",
+  "fragmentWeight": 3,
+  "killWeight": 1,
+  "milestoneWeight": 2,
+  "killContributionCap": 40,
+  "finaleRevealTextKey": "story.voidcraft.guardian_revealed",
+  "finaleResolvedTextKey": "story.voidcraft.finale_resolved",
+  "finaleSystemNameKey": "story.voidcraft.guardian_system",
+  "insightUnlockBeatCount": 6,
+  "companionWardTextKey": "story.voidcraft.insight.companion_ward",
+  "shapeAnomalyTextKey": "story.voidcraft.insight.shape_anomaly",
+  "beats": [
+    { "index": 0, "title": "No sky in memory", "textKey": "story.voidcraft.beat00", "threshold": 0, "knowledgeReward": 0 },
+    { "index": 1, "title": "The signal below", "textKey": "story.voidcraft.beat01", "threshold": 3, "knowledgeReward": 1 },
+    { "index": 2, "title": "The first seal", "textKey": "story.voidcraft.beat02", "threshold": 8, "knowledgeReward": 1 },
+    { "index": 3, "title": "The same hand", "textKey": "story.voidcraft.beat03", "threshold": 15, "knowledgeReward": 1 },
+    { "index": 4, "title": "World-shells", "textKey": "story.voidcraft.beat04", "threshold": 24, "knowledgeReward": 1 },
+    { "index": 5, "title": "The Veyl", "textKey": "story.voidcraft.beat05", "threshold": 36, "knowledgeReward": 1 },
+    { "index": 6, "title": "The Sleeper signal", "textKey": "story.voidcraft.beat06", "threshold": 50, "knowledgeReward": 1 },
+    { "index": 7, "title": "The silence", "textKey": "story.voidcraft.beat07", "threshold": 66, "knowledgeReward": 1 },
+    { "index": 8, "title": "The waking lattice", "textKey": "story.voidcraft.beat08", "threshold": 84, "knowledgeReward": 1 },
+    { "index": 9, "title": "What you are", "textKey": "story.voidcraft.beat09", "threshold": 104, "knowledgeReward": 1 },
+    { "index": 10, "title": "Not the first", "textKey": "story.voidcraft.beat10", "threshold": 126, "knowledgeReward": 1 },
+    { "index": 11, "title": "The Black Anchor", "textKey": "story.voidcraft.beat11", "threshold": 150, "knowledgeReward": 1 },
+    { "index": 12, "title": "The choice", "textKey": "story.voidcraft.beat12", "threshold": 176, "knowledgeReward": 1 }
+  ],
+  "fragments": [
+    { "key": "frag_vega_return", "category": "vega", "textKey": "lore.void.frag_vega_return", "weight": 2 },
+    { "key": "frag_veyl_lintel", "category": "veyl", "textKey": "lore.void.frag_veyl_lintel", "weight": 3 },
+    { "key": "frag_guardian_vow", "category": "guardian", "textKey": "lore.void.frag_guardian_vow", "weight": 3 },
+    { "key": "frag_lattice_echo", "category": "lattice", "textKey": "lore.void.frag_lattice_echo", "weight": 2 },
+    { "key": "frag_settler_dream", "category": "settlers", "textKey": "lore.void.frag_settler_dream", "weight": 3 },
+    { "key": "frag_anchor_depth", "category": "anchor", "textKey": "lore.void.frag_anchor_depth", "weight": 1 }
+  ],
+  "memories": [
+    { "key": "mem_first_descent", "textKey": "lore.void.mem_first_descent" },
+    { "key": "mem_impossible_stair", "textKey": "lore.void.mem_impossible_stair" },
+    { "key": "mem_cut_the_route", "textKey": "lore.void.mem_cut_the_route" },
+    { "key": "mem_last_pilot", "textKey": "lore.void.mem_last_pilot" }
+  ],
+  "coreArguments": [
+    {
+      "key": "shell",
+      "promptKey": "core.void.n0.prompt",
+      "choices": [
+        { "textKey": "core.void.n0.c0", "correct": true, "responseKey": "core.void.n0.r0" },
+        { "textKey": "core.void.n0.c1", "correct": false, "responseKey": "core.void.n0.r1" },
+        { "textKey": "core.void.n0.c2", "correct": false, "responseKey": "core.void.n0.r2" }
+      ]
+    },
+    {
+      "key": "silence",
+      "promptKey": "core.void.n1.prompt",
+      "choices": [
+        { "textKey": "core.void.n1.c0", "correct": false, "responseKey": "core.void.n1.r0" },
+        { "textKey": "core.void.n1.c1", "correct": true, "responseKey": "core.void.n1.r1" },
+        { "textKey": "core.void.n1.c2", "correct": false, "responseKey": "core.void.n1.r2" }
+      ]
+    },
+    {
+      "key": "mandate",
+      "promptKey": "core.void.n2.prompt",
+      "choices": [
+        { "textKey": "core.void.n2.c0", "correct": false, "responseKey": "core.void.n2.r0" },
+        { "textKey": "core.void.n2.c1", "correct": false, "responseKey": "core.void.n2.r1" },
+        { "textKey": "core.void.n2.c2", "correct": true, "responseKey": "core.void.n2.r2" }
+      ]
+    },
+    {
+      "key": "echo",
+      "promptKey": "core.void.n3.prompt",
+      "choices": [
+        { "textKey": "core.void.n3.c0", "correct": true, "responseKey": "core.void.n3.r0" },
+        { "textKey": "core.void.n3.c1", "correct": false, "responseKey": "core.void.n3.r1" },
+        { "textKey": "core.void.n3.c2", "correct": false, "responseKey": "core.void.n3.r2" }
+      ]
+    }
+  ],
+  "flavourLines": [
+    { "key": "fl_ground_hums", "textKey": "flavour.void.fl_ground_hums", "minKnowledge": 0, "weight": 2 },
+    { "key": "fl_same_dream", "textKey": "flavour.void.fl_same_dream", "minKnowledge": 1, "weight": 2 },
+    { "key": "fl_machines_listen", "textKey": "flavour.void.fl_machines_listen", "minKnowledge": 2, "weight": 2 },
+    { "key": "fl_black_anchor", "textKey": "flavour.void.fl_black_anchor", "minKnowledge": 3, "weight": 1 },
+    { "key": "fl_quiet_sky", "textKey": "flavour.void.fl_quiet_sky", "minKnowledge": 4, "weight": 1 }
+  ],
+  "missionThreads": [
+    { "missionIdContains": "settlement", "fragmentKey": "frag_settler_dream" }
+  ]
+}
