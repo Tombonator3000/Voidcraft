@@ -25,8 +25,9 @@ envelope at the WebSocket edge; deterministic seed world-gen; SQLite default per
 
 ## Voidcraft foundation
 
-First identity/story slice on branch `feat/voidcraft-foundation` (2026-08-07), built on the AGPL-licensed
-Blocks Beyond the Stars foundation. Design and scope: [Voidcraft foundation](docs/developer/VOIDCRAFT_FOUNDATION.md).
+First identity/story slice on branch `feat/voidcraft-foundation` (2026-08-07), with GitHub playtest delivery
+on `feat/voidcraft-playable` (2026-08-12), built on the AGPL-licensed Blocks Beyond the Stars foundation.
+Design and scope: [Voidcraft foundation](docs/developer/VOIDCRAFT_FOUNDATION.md).
 
 **Done**
 
@@ -39,14 +40,21 @@ Blocks Beyond the Stars foundation. Design and scope: [Voidcraft foundation](doc
 - Finale reveal/resolution and contextual insight lines moved out of VEGA-specific server constants and into
   story-pack data; story validation now covers every referenced story locale key.
 - Registry, loader and server-story tests updated for the new default and multi-pack compatibility.
+- Fork-facing update/news/contribution links now target `Tombonator3000/Voidcraft`; the upstream Official
+  Worlds service is disabled by default while explicit self-hosted WorldHost URLs remain supported.
+- Fork-specific `voidcraft-playtest.yml` validates the fast .NET tier and produces a portable Windows player
+  with the bundled local server. Setup/download instructions and an in-archive start guide are committed.
 
 **Open before a public Voidcraft build**
 
 - Build the guaranteed near-spawn **Signal Scar** encounter and tune the first 30 minutes through playtests.
 - Add a visible three-way world-creation selector (Sleeper Signal / VEGA Protocol / sandbox).
 - Create a distinct logo, menu imagery, Anchor geometry/audio and Voidcraft screenshots.
-- Replace upstream update, hosted-world and release endpoints with fork-owned infrastructure.
-- Run the full .NET and Unity suites in a dependency-complete build environment, then package clean clients.
+- Enable Actions on the fork, add the encrypted Unity/GameCI credentials, and complete the first green Windows
+  artifact run. See [Voidcraft GitHub playtest](docs/developer/VOIDCRAFT_PLAYTEST.md).
+- Create fork-owned hosted-world/release infrastructure before enabling those public services.
+- Run the full .NET and Unity suites in a dependency-complete build environment, then package signed release
+  clients. The playtest workflow intentionally runs the non-Slow .NET tier and produces an unsigned artifact.
 
 ---
 

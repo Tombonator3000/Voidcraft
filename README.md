@@ -4,15 +4,28 @@
 built as locks.** Mine, craft and build across planets; construct and fly your ship between them; follow a
 cosmic-horror mystery about the ancient Veyl, buried Anchors and a signal that is beginning to listen back.
 
-> **Development status:** the first identity/story foundation is implemented on
-> `feat/voidcraft-foundation`. There is no public Voidcraft binary or hosted service yet. The upstream links
-> below belong to Blocks Beyond the Stars and are retained for provenance, not as Voidcraft infrastructure.
+> **Development status:** the first identity/story foundation is implemented, and a fork-owned portable
+> Windows playtest pipeline is ready on `feat/voidcraft-playable`. The first downloadable artifact still
+> requires the fork's one-time GitHub Actions/Unity license setup. There is no Voidcraft hosted service yet.
 
 The first slice adds Voidcraft branding and makes **Voidcraft: The Sleeper Signal** the default campaign for
 fresh saves. Its 13-beat arc, world fragments, memories, reactive NPC lines and finale dialogue are complete in
 English and German. The existing voxel sandbox, procedural galaxy, ship flight, multiplayer and authoritative
 server remain the gameplay foundation. See the [Voidcraft foundation brief](docs/developer/VOIDCRAFT_FOUNDATION.md)
 and [live status](TODO.md).
+
+## Windows playtest from GitHub
+
+The fork contains a dedicated **Voidcraft Windows playtest** workflow. It validates the story and .NET game
+code, builds the Unity client, bundles the local server for offline Singleplayer, and uploads the complete
+portable game as a GitHub Actions artifact. No separate server or player account is required.
+
+The repository owner must first enable Actions and add the three encrypted Unity/GameCI secrets described in
+the [playtest build guide](docs/developer/VOIDCRAFT_PLAYTEST.md). After the first green run, download the
+`Voidcraft-Windows-Playtest-*` artifact from
+[GitHub Actions](https://github.com/Tombonator3000/Voidcraft/actions/workflows/voidcraft-playtest.yml), extract
+the full archive and start `BlocksBeyondTheStars.exe`. The executable keeps the engine's technical codename;
+the player-facing game and separate save-data identity are Voidcraft.
 
 ## Open-source foundation
 

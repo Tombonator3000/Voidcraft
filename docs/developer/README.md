@@ -16,6 +16,8 @@ refreshed 2026-08-08.
   solution & project graph, runtime, networking, persistence, and a where-to-find-what map. **Read this first.**
 - [DEVELOPER.md](DEVELOPER.md) — build, test and build-verification guide (the `build-client.ps1`/`build-client.sh`
   pipeline, freshness checks, "works in the Editor, broken in the build" pitfalls).
+- [VOIDCRAFT_PLAYTEST.md](VOIDCRAFT_PLAYTEST.md) — one-time GitHub/GameCI setup and the portable Windows
+  playtest build/download workflow for this fork.
 - [LINUX_PORT.md](LINUX_PORT.md) — how the Linux port works: cross-platform changes, the console launcher,
   bash build scripts, CI/CD and known limitations.
 - [MACOS_BUILD.md](MACOS_BUILD.md) — the experimental macOS build: `StandaloneOSX` cross-built on Linux (Mono),

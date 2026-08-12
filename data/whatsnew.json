@@ -1,6 +1,14 @@
 {
   "entries": [
     {
+      "version": "2026.8.12",
+      "date": "2026-08-12",
+      "title_de": "Voidcraft wird auf GitHub spielbar",
+      "title_en": "Voidcraft becomes playable from GitHub",
+      "body_de": "Der erste Voidcraft-Buildweg steht: GitHub prüft die Sleeper-Signal-Story und den .NET-Spielkern, baut den Windows-Client mit Unity und packt den lokalen Server direkt dazu. Dadurch läuft Einzelspieler nach dem Download ohne Konto und ohne separaten Server. Die Update-, Neuigkeiten- und Mitmachen-Links führen jetzt zu unserem Voidcraft-Fork. Die Offiziellen Welten des Ursprungsprojekts bleiben abgeschaltet, bis Voidcraft einen eigenen Dienst hat; LAN-Hosting und direkte Verbindungen funktionieren weiter. Dieser frühe Playtest ist noch unsigniert und behält für EXE und Datenordner den technischen Namen BlocksBeyondTheStars.",
+      "body_en": "The first Voidcraft build path is ready: GitHub validates The Sleeper Signal and the .NET game core, builds the Windows client with Unity, and bundles the local server beside it. That makes Singleplayer work after download without an account or a separate server. Update, news and contribution links now lead to our Voidcraft fork. The upstream project's Official Worlds stay disabled until Voidcraft has its own service; LAN hosting and direct joins still work. This early playtest is unsigned and retains the technical BlocksBeyondTheStars name for the executable and data folder."
+    },
+    {
       "version": "2026.8.11",
       "date": "2026-08-11",
       "title_de": "Jede Welt hat ihr eigenes Wetter 🌦",

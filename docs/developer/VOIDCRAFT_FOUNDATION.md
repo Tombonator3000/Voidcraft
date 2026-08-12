@@ -65,10 +65,13 @@ The next slice should make the opening mystery physical and testable:
 3. Tie the first craft-and-mine tutorial steps to reaching the Scar without making the tutorial story-specific.
 4. Add a real story-pack selector to world creation so Voidcraft, VEGA Protocol and sandbox are all visible.
 5. Replace the reused finale chamber/enemies with Anchor-specific geometry and audiovisual language.
-6. Run a clean-build playtest and tune the first 30 minutes, fragment density and beat thresholds from evidence.
+6. Complete the first GitHub Windows artifact build, then tune the first 30 minutes, fragment density and beat
+   thresholds from playtest evidence.
 
 ## Release boundaries
 
-Before publishing a Voidcraft build, the fork needs its own distribution identifiers, update feed, hosted-world
-policy, screenshots and release workflow. Upstream service URLs and release links must not be presented as
-Voidcraft infrastructure. Upstream copyright, license notices and contributor attribution remain intact.
+The fork now owns its GitHub update/news/contribution targets and has a portable Windows playtest workflow.
+The upstream hosted-worlds service is disabled by default; explicit self-hosted WorldHost URLs still work.
+Before a public release, Voidcraft still needs a first green Unity artifact, a hosted-world policy or service,
+distinct screenshots, signed packages and a verified release workflow. Upstream copyright, license notices and
+contributor attribution remain intact. See [VOIDCRAFT_PLAYTEST.md](VOIDCRAFT_PLAYTEST.md).

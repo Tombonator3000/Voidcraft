@@ -1,0 +1,16 @@
+VOIDCRAFT WINDOWS PLAYTEST
+==========================
+
+1. Extract the complete download to a normal folder. Do not run it inside the ZIP.
+2. Run BlocksBeyondTheStars.exe.
+3. Enter a pilot name and choose Singleplayer.
+
+Singleplayer starts the bundled local server and does not need an account or a separate server.
+Windows SmartScreen may warn because this early playtest is not code-signed. Check that the file came
+from https://github.com/Tombonator3000/Voidcraft before choosing More info > Run anyway.
+
+The executable and its matching _Data folder retain the technical BlocksBeyondTheStars codename for
+compatibility. The player-facing title and separate save-data identity are Voidcraft.
+
+Official hosted worlds are not part of this playtest. LAN hosting and direct server joins remain available.
+Report problems at https://github.com/Tombonator3000/Voidcraft/issues
