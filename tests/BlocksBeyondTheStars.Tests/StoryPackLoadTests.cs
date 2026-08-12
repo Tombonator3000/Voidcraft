@@ -100,8 +100,11 @@ public class StoryPackLoadTests
 
         foreach (var key in keys)
         {
-            Assert.False(en.Get(key).StartsWith("["), $"EN missing {key}");
-            Assert.False(de.Get(key).StartsWith("["), $"DE missing {key}");
+            // Some real story prose deliberately begins with a bracketed source marker, for example
+            // "[recovered ship trace]". Checking the rendered prefix therefore reports false missing
+            // keys; Localizer.Has is the exact table/fallback lookup used by Get.
+            Assert.True(en.Has(key), $"EN missing {key}");
+            Assert.True(de.Has(key), $"DE missing {key}");
         }
     }
 

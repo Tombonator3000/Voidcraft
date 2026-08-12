@@ -44,6 +44,8 @@ Design and scope: [Voidcraft foundation](docs/developer/VOIDCRAFT_FOUNDATION.md)
   Worlds service is disabled by default while explicit self-hosted WorldHost URLs remain supported.
 - Fork-specific `voidcraft-playtest.yml` validates the fast .NET tier and produces a portable Windows player
   with the bundled local server. Setup/download instructions and an in-archive start guide are committed.
+- The first GitHub run compiled with zero warnings and exposed a story-locale test false positive: legitimate
+  bracket-led recovered-log prose is now checked with `Localizer.Has` instead of mistaken for `[missing.key]`.
 
 **Open before a public Voidcraft build**
 
