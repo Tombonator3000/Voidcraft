@@ -220,8 +220,8 @@ jobs:
         shell: bash
         run: |
           sudo chmod -R a+rwX player-linux
-          chmod +x player-linux/BlocksBeyondTheStars.x86_64
-          chmod +x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
+          sudo chmod +x player-linux/BlocksBeyondTheStars.x86_64
+          sudo chmod +x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
           cp docs/user/START-HERE-LINUX.txt player-linux/START-HERE.txt
           cp docs/user/Start-Voidcraft.sh player-linux/Start-Voidcraft.sh
           chmod +x player-linux/Start-Voidcraft.sh
