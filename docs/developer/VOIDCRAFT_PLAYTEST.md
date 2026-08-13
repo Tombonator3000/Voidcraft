@@ -1,8 +1,9 @@
-# Voidcraft GitHub Windows playtest
+# Voidcraft GitHub desktop playtest
 
 Status: the fork-specific workflow is implemented in
 [`.github/workflows/voidcraft-playtest.yml`](../../.github/workflows/voidcraft-playtest.yml). A green run
-produces a portable Windows artifact with the Unity player, all content and a bundled local server.
+produces portable Windows and Kubuntu/Linux artifacts with the Unity player, all content and a bundled
+platform-native local server.
 It does not publish a GitHub Release or use an upstream hosted-worlds service.
 
 ## One-time fork setup
@@ -29,19 +30,26 @@ activation procedure is maintained in the [GameCI activation guide](https://game
 ## Build and download
 
 A push to `feat/voidcraft-playable` starts the workflow automatically. Once the workflow also exists on the
-default branch, it can be started manually from **Actions → Voidcraft Windows playtest → Run workflow**.
+default branch, it can be started manually from **Actions → Voidcraft desktop playtest → Run workflow**.
 
-After both jobs are green, open the run and download
-`Voidcraft-Windows-Playtest-<run number>` under **Artifacts**. Extract the entire download and run
-`BlocksBeyondTheStars.exe`; the technical executable name is retained because Unity requires its matching
-`BlocksBeyondTheStars_Data` folder. Player-facing branding and the save-data identity are Voidcraft.
+After validation and the relevant platform job are green, open the run's **Artifacts** section:
 
-The build is unsigned, so Windows SmartScreen may warn. The artifact is retained for 30 days. Singleplayer
-works offline after download; LAN hosting and direct joins are available, while official hosted worlds are
-disabled until Voidcraft operates its own service.
+- **Windows:** download `Voidcraft-Windows-Playtest-<run number>`, extract the entire ZIP and run
+  `BlocksBeyondTheStars.exe`.
+- **Kubuntu/Linux:** download `Voidcraft-Kubuntu-Playtest-<run number>` and extract the outer ZIP. It contains
+  a same-named `.tar.gz`; extract that tarball into a new folder and run `./Start-Voidcraft.sh`. The tarball
+  is required because GitHub's artifact ZIP does not preserve Linux executable permissions.
+
+The technical executable name is retained because Unity requires its matching `BlocksBeyondTheStars_Data`
+folder. Player-facing branding and the save-data identity are Voidcraft.
+
+The builds are unsigned, so Windows SmartScreen may warn. Both artifacts are retained for 30 days.
+Singleplayer works offline after download; LAN hosting and direct joins are available, while official hosted
+worlds are disabled until Voidcraft operates its own service.
 
 ## What the workflow verifies
 
 Before uploading a game, GitHub validates both story packs and locale tables, builds the .NET server/client
-test projects with warnings as errors, runs their non-Slow test tier, builds Unity 6000.4.9f1, and checks that
-the artifact contains the Windows executable, the bundled server and `voidcraft_awakening` story data.
+test projects with warnings as errors, runs their non-Slow test tier, builds Unity 6000.4.9f1 for Windows and
+Linux, and checks that each artifact contains its player executable, bundled platform-native server and
+`voidcraft_awakening` story data. The Linux job also verifies its tarball before upload.

@@ -1,0 +1,22 @@
+VOIDCRAFT KUBUNTU / LINUX PLAYTEST
+=================================
+
+The GitHub artifact download is a ZIP containing a .tar.gz file. Extract the ZIP first, then open a
+terminal in that folder and run:
+
+  mkdir Voidcraft
+  tar -xzf Voidcraft-Kubuntu-Playtest-*.tar.gz -C Voidcraft
+  cd Voidcraft
+  ./Start-Voidcraft.sh
+
+If you are reading START-HERE.txt inside the extracted Voidcraft folder, the first three commands are
+already complete; run only ./Start-Voidcraft.sh.
+
+The tar.gz layer is intentional: it preserves the executable permissions required by the Unity player and
+its bundled local server. Singleplayer needs no account and no separately installed server.
+
+The executable and its matching _Data folder retain the technical BlocksBeyondTheStars codename for
+compatibility. The player-facing title and separate save-data identity are Voidcraft.
+
+Official hosted worlds are not part of this playtest. LAN hosting and direct server joins remain available.
+Report problems at https://github.com/Tombonator3000/Voidcraft/issues

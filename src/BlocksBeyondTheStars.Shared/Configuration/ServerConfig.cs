@@ -1,719 +1,1 @@
-// Blocks Beyond the Stars â€” Copyright (c) 2026 Justus DÃ¼tscher & Marcel DÃ¼tscher (JuMaVe Games)
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// This file is part of Blocks Beyond the Stars. See LICENSE for the full AGPL-3.0 text.
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
-namespace BlocksBeyondTheStars.Shared.Configuration;
-
-/// <summary>
-/// Self-hosting server configuration (technical requirements Â§14). Loaded from
-/// <c>config/server.json</c>; shared by the game server and the admin web UI, and
-/// editable through the admin UI.
-/// </summary>
-public sealed class ServerConfig
-{
-    public const int DefaultGameplayPort = 31415;
-    public const int DefaultAdminPort = 31416;
-
-    public string ServerName { get; set; } = "Blocks Beyond the Stars Server";
-    public string WorldName { get; set; } = "world_001";
-
-    public int GameplayPort { get; set; } = DefaultGameplayPort;
-    public int AdminPort { get; set; } = DefaultAdminPort;
-
-    /// <summary>Also accept browser clients over WebSocket (on the gameplay port, TCP).</summary>
-    public bool EnableWebSocket { get; set; }
-
-    /// <summary>WebSocket bind host ("localhost"/LAN ip for safety, "+" for all interfaces).</summary>
-    public string WebSocketBindAddress { get; set; } = "localhost";
-
-    public int MaxPlayers { get; set; } = 12;
-    public string ServerPassword { get; set; } = string.Empty;
-    public bool WhitelistEnabled { get; set; }
-    public List<string> Whitelist { get; set; } = new();
-    public string AdminPassword { get; set; } = string.Empty;
-
-    /// <summary>Player names granted the Admin role on join (the world creator becomes WorldAdmin).</summary>
-    public List<string> AdminPlayers { get; set; } = new();
-
-    /// <summary>Player names granted <b>fleet admin</b> on join â€” the operator of the hosting installation,
-    /// as opposed to the owner of an individual world. Fleet admins are the only ones who may enter the
-    /// invisible observer mode (issue #487), because that power reaches into worlds other people own.
-    ///
-    /// <para>Deliberately NOT a <see cref="Shared.State.PlayerRole"/> value: roles live in
-    /// <see cref="Shared.State.PlayerState.Role"/> and are persisted in the save, and saves can be downloaded,
-    /// edited and re-uploaded by players. A persisted fleet role would therefore travel into worlds the
-    /// operator does not control. This list is config-only and re-evaluated on every join.</para></summary>
-    public List<string> FleetAdminPlayers { get; set; } = new();
-
-    public int AutoSaveIntervalMinutes { get; set; } = 5;
-    public int BackupIntervalMinutes { get; set; } = 60;
-
-    public int ViewDistanceChunks { get; set; } = 4;
-    public int MaxLoadedChunksPerPlayer { get; set; } = 256;
-
-    /// <summary>How many chunks the server streams to each player per tick. Raised from the historical hard-coded
-    /// 12 to keep the (larger, default-4) view filling promptly â€” a wider view distance has quadratically more
-    /// chunks to send, so a too-small budget makes terrain "thaw in" slowly at the horizon. Each freshly streamed
-    /// chunk that isn't cached is generated synchronously in the tick, so this also bounds first-visit gen cost:
-    /// a host seeing tick overruns on weak hardware can lower it; a strong host can raise it for snappier fill.</summary>
-    public int ChunkStreamPerTick { get; set; } = 16;
-
-    /// <summary>Optional wall-clock budget (milliseconds) for chunk streaming per tick; 0 = off. When set,
-    /// StreamChunks stops sending once the budget is spent â€” remaining chunks come next tick, nearest-first
-    /// order unchanged. Meant for hosts where the tick shares a thread with rendering (the in-browser
-    /// singleplayer): a cheap tick still streams the full ChunkStreamPerTick, but a burst of expensive
-    /// first-visit generations can't stall the frame. Dedicated servers leave this off.</summary>
-    public double ChunkStreamBudgetMs { get; set; }
-
-    public string Difficulty { get; set; } = "normal";
-    public bool AllowGuests { get; set; } = true;
-
-    /// <summary>Bind address for the admin UI; defaults to loopback so it is not public (Â§13.3).</summary>
-    public string AdminBindAddress { get; set; } = "127.0.0.1";
-
-    /// <summary>Server simulation tick rate in Hz (10â€“20 recommended, Â§7.2).</summary>
-    public int TickRate { get; set; } = 15;
-
-    /// <summary>Long world seed; 0 means "derive one from the world name".</summary>
-    public long Seed { get; set; }
-
-    /// <summary>Planet type the world starts on. The default is a breathable, fertile type so a new
-    /// player begins with air, food plants and the common ores (not a toxic survival-pressure world).</summary>
-    public string StartPlanet { get; set; } = "varied";
-
-    /// <summary>Authoritative world rules (mode, PvP, hazards, death penalty, cheats, ...).</summary>
-    public GameRules Rules { get; set; } = new();
-
-    /// <summary>Universe description used when first creating the world. System variance (#546) and
-    /// asteroid belts (#683) are on here â€” every NEWLY created world gets archetype-varied star systems
-    /// whose asteroids share real belt annuli â€” while the
-    /// <see cref="BlocksBeyondTheStars.Shared.World.WorldDescription.SystemVariance"/> and
-    /// <see cref="BlocksBeyondTheStars.Shared.World.WorldDescription.AsteroidBelts"/> properties
-    /// default to false, so a loaded save whose metadata predates the features stays byte-identical.</summary>
-    public BlocksBeyondTheStars.Shared.World.WorldDescription World { get; set; } = new() { SystemVariance = true, AsteroidBelts = true, TerrainContinents = true };
-
-    /// <summary>Optional AI mission backend level (Off keeps the game fully AI-free).</summary>
-    public AiLevel AiLevel { get; set; } = AiLevel.Off;
-
-    /// <summary>Base URL of the optional Python AI backend (used when <see cref="AiLevel"/> is not Off).</summary>
-    public string AiBackendUrl { get; set; } = "http://127.0.0.1:8077";
-
-    /// <summary>HTTP timeout (seconds) for AI-backend calls. Generous by design: players never wait on
-    /// AI (they always get an instant static/template line; the LLM line upgrades it asynchronously), so
-    /// this only bounds how late an upgrade may still arrive. Keep it ABOVE the backend's own LLM timeout
-    /// (BBTS_AI_TIMEOUT, default 30 s) so the backend's template fallback beats this deadline.</summary>
-    public int AiTimeoutSeconds { get; set; } = 35;
-
-    /// <summary>Endpoint the server POSTs automatic crash reports to â€” the ReportHost bug-report inbox, shared
-    /// with player feedback + client crashes (server reports are shaped to the same contract). Uploading stays
-    /// OFF until <see cref="CrashReportApiKey"/> is also set, so a self-hosted server never phones home unless
-    /// its operator opts in; reports are written to the local <c>crashreports/</c> folder regardless.</summary>
-    public string CrashReportEndpoint { get; set; } = "https://reports.blocksbeyondthestars.de/api/bugreport";
-
-    /// <summary>Spam-gate key sent with an automatic crash report (the <c>x-bugreport-key</c> header). Empty
-    /// (the default) leaves crash uploading disabled regardless of the endpoint â€” official builds inject it.</summary>
-    public string CrashReportApiKey { get; set; } = string.Empty;
-
-    /// <summary>Operator push-notification URL (<c>BBS_NOTIFY_URL</c>, issue #938) â€” an ntfy topic URL or
-    /// any webhook that accepts a plain-text POST. Pinged on <c>/reportpaint</c>/<c>/reportshape</c> and on
-    /// watch-list name flags. Empty (the default) = off; the hosted fleet leaves this unset because the
-    /// WorldHost/ReportHost carry their own notify hooks there.</summary>
-    public string NotifyUrl { get; set; } = string.Empty;
-
-    /// <summary>Name block list enforced at join (shared semantics with the WorldHost gates â€” see
-    /// <see cref="Moderation.NameScreen"/>). <c>BBS_BLOCKED_WORDS</c> (comma-separated) EXTENDS the
-    /// defaults; substring-matched, so number codes or short abbreviations never belong here.</summary>
-    public List<string> BlockedNameWords { get; set; } = new(Moderation.NameScreen.DefaultBlockedWords);
-
-    /// <summary>Name watch list: a join under a matching name is ALLOWED but logged + pushed to
-    /// <see cref="NotifyUrl"/> â€” the human decides, not the filter (issue #938). <c>BBS_WATCH_WORDS</c>
-    /// (comma-separated) EXTENDS the defaults; a leading '=' pins an entry to whole-token matching.</summary>
-    public List<string> WatchNameWords { get; set; } = new(Moderation.NameScreen.DefaultWatchWords);
-
-    /// <summary>Opt-in live voice chat. When false (the default on dedicated servers) the server rejects/ignores
-    /// voice frames and tells clients voice is unavailable; text chat is unaffected. Voice is relayed live and
-    /// never recorded. The bundled singleplayer/host launcher may turn this on for local co-op.</summary>
-    public bool VoiceChatEnabled { get; set; }
-
-    // --- Hosted-worlds fleet support (operator-set, never player-facing). A control plane that spawns one
-    // server container per world uses these to make instances stop when unused, gate joins to players it
-    // vouched for, and hand the uploading owner their world back. All three default OFF, so singleplayer,
-    // LAN hosting and classic self-hosting behave exactly as before. ---
-
-    /// <summary>Shut the server down cleanly (drain + save, like Ctrl+C) after this many minutes with no
-    /// joined player â€” counted from startup too, so a woken instance nobody joins also stops. 0 (default)
-    /// = never; a container running this must NOT use an auto-restart policy or it defeats the idle stop.</summary>
-    public int IdleShutdownMinutes { get; set; }
-
-    /// <summary>When set, every network join must carry a valid HMAC join token issued for this world by the
-    /// control plane (see <c>HostedJoinToken</c>). Empty (default) = joins work as before. Local/singleplayer
-    /// sessions are exempt â€” the bundled host never sets this.</summary>
-    public string JoinTokenSecret { get; set; } = string.Empty;
-
-    /// <summary>Account id of the world's owner in the control plane. A token-verified join whose account id
-    /// matches is granted WorldAdmin regardless of the "first joiner becomes WorldAdmin" rule â€” required for
-    /// uploaded saves, where someone else may already hold that role. Empty (default) = no owner mapping.</summary>
-    public string WorldOwnerAccountId { get; set; } = string.Empty;
-
-    /// <summary>Shared secret the control plane must present (X-Announce-Token header) to push a maintenance
-    /// announcement via the WebSocket gateway's <c>POST /announce</c>. Empty (default) = endpoint disabled;
-    /// the bundled/self-hosted server never sets this (admins use the in-game /announce commands instead).</summary>
-    public string AnnounceToken { get; set; } = string.Empty;
-
-    // --- Filesystem locations (resolved relative to the server install dir) ---
-
-    public string SavesRoot { get; set; } = "saves";
-    public string DataDir { get; set; } = "data";
-
-    /// <summary>
-    /// Persistence backend for authoritative world state. "sqlite" is the portable default; "postgresql"
-    /// uses <see cref="PostgresConnectionString"/> and is intended for hosted dedicated/MMO-style servers.
-    /// </summary>
-    public string DatabaseProvider { get; set; } = "sqlite";
-
-    /// <summary>PostgreSQL connection string. Prefer supplying this through BBS_POSTGRES_CONNECTION_STRING
-    /// or DATABASE_URL in hosted deployments instead of committing it to server.json.</summary>
-    public string PostgresConnectionString { get; set; } = string.Empty;
-
-    /// <summary>Optional writable folder holding in-game-editor structure templates
-    /// (<c>station_templates/*.json</c>, <c>settlement_templates/*.json</c>). When set, they are merged
-    /// into the template pools at load so player-authored structures appear in new worlds without a
-    /// rebuild. Empty â‡’ only the shipped <c>data/</c> pools are used.</summary>
-    public string UserContentDir { get; set; } = string.Empty;
-
-    /// <summary>Whether to stamp the enterable starter-ship hull at the start landing zone (M23a).</summary>
-    public bool PlaceStarterShip { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp a procedural settlement on the start planet's surface (away
-    /// from the landing zone) when the planet + seed call for one.
-    /// </summary>
-    public bool PlaceSettlements { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp a rare crashed-ship wreck on the start planet's surface (away
-    /// from the landing zone). Wrecks are uncommon and left scavengeable (not protected).
-    /// </summary>
-    public bool PlaceWrecks { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp buried vault ruins ("Welten reicher" W-R3) â€” 0â€“2 per world: a surface
-    /// pillar ring over a shaft down to a stone chamber with data caches + lootable containers.
-    /// </summary>
-    public bool PlaceVaults { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may scatter "data cubes" on a body's surface â€” 0â€“N per world (some bodies get
-    /// none): glowing download terminals that grant the player a small bundled minigame for their personal
-    /// arcade collection. Deterministic from the world seed; carry no gameplay effect.
-    /// </summary>
-    public bool PlaceDataCubes { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp procedural <b>factories</b> on a body's surface â€” rare industrial buildings
-    /// (0â€“N per world, most get none) housing animated machines and a production terminal. Protected like a
-    /// settlement until claimed with an access code. Deterministic from the world seed.
-    /// </summary>
-    public bool PlaceFactories { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp randomised <b>ruins</b> of fallen settlements on a body's surface â€” partial
-    /// walls, a half-collapsed tower, rubble. Unlike intact settlements, ruins are NOT protected (their blocks
-    /// are freely mineable). Deterministic from the world seed.
-    /// </summary>
-    public bool PlaceRuins { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may scatter standalone <b>treasure chests</b> on a body's surface â€” rare lootable
-    /// caches independent of any structure (0â€“N per world, most get none). Looted once, then gone.
-    /// Deterministic from the world seed.
-    /// </summary>
-    public bool PlaceChests { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp <b>bandit camps</b> on a body's surface â€” small hostile outposts
-    /// (huts + palisade) guarded by bandit NPCs, with a loot stash as the raid reward. Like ruins the
-    /// blocks are NOT protected; a razed camp stays razed and cleared bandits stay gone. Camps also
-    /// require <see cref="GameRules.Bandits"/> to be enabled. Deterministic from the world seed.
-    /// </summary>
-    public bool PlaceBanditCamps { get; set; } = true;
-
-    /// <summary>
-    /// Whether the server may stamp <b>monuments</b> on a body's surface â€” eroded relics of a vanished
-    /// civilisation (arcade arches, a free-standing gate, a stone circle, an obelisk, a rune altar), carved
-    /// with glowing runes that grant knowledge points when scanned. Like ruins the blocks are NOT protected,
-    /// so a razed monument stays razed. Unlike every other surface feature these also appear on airless
-    /// bodies. Deterministic from the world seed.
-    /// </summary>
-    public bool PlaceMonuments { get; set; } = true;
-
-    /// <summary>
-    /// Singleplayer/admin convenience: guarantee one data cube right next to the start world's landing pad, so
-    /// a solo player can always reach a minigame near spawn. Set only by the bundled singleplayer launcher;
-    /// left off on shared/dedicated servers (where the random scatter applies as normal).
-    /// </summary>
-    public bool GuaranteeStartDataCube { get; set; }
-
-    // --- Singleplayer "Creative" world options (the player picks these at world creation). They are a
-    // head-start sandbox: everything available + a starter set, while survival mechanics stay ON. Default
-    // false = the normal "Explorer" experience. Persisted per world in WorldMetadata so they reapply on load. ---
-
-    /// <summary>Start with every blueprint unlocked (re-applied each join; idempotent).</summary>
-    public bool CreativeUnlockAllBlueprints { get; set; }
-
-    /// <summary>Own every ship type from the start (re-applied each join; idempotent).</summary>
-    public bool CreativeStartAllShips { get; set; }
-
-    /// <summary>Grant a curated kit (all tools + generous stacks of key materials) once, at first spawn.</summary>
-    public bool CreativeStarterKit { get; set; }
-
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
-    /// <summary>
-    /// Resolves the startup config. Normally this is <see cref="Load"/> (which reads â€” and on first run
-    /// auto-creates â€” <c>config/server.json</c> next to the exe, the documented dedicated-server flow).
-    /// When <c>--no-config</c> is present it returns pure in-memory defaults instead and touches no file.
-    ///
-    /// The bundled singleplayer host passes <c>--no-config</c> (see <c>LocalServerLauncher</c>): its server
-    /// exe lives in the read-only, reused-across-rebuilds bundle folder, where a leftover <c>server.json</c>
-    /// from an earlier run/playtest would otherwise be read verbatim and override newer code defaults such
-    /// as the start planet â€” the exact reason a freshly-built client could still spawn the old "rocky" start
-    /// world. The host relies purely on code defaults plus its explicit CLI overrides, so it is immune to a
-    /// stale bundled config on every install path (local build, installer, portable, Velopack update).
-    /// Dedicated servers omit the flag and keep the auto-generated, editable <c>config/server.json</c>.
-    /// </summary>
-    public static ServerConfig LoadForStartup(string[]? args, string path)
-        => (args is not null && Array.IndexOf(args, "--no-config") >= 0) ? new ServerConfig() : Load(path);
-
-    public static ServerConfig Load(string path)
-    {
-        if (!File.Exists(path))
-        {
-            var fresh = new ServerConfig();
-            fresh.Save(path);
-            return fresh;
-        }
-
-        return JsonSerializer.Deserialize<ServerConfig>(File.ReadAllText(path), Options) ?? new ServerConfig();
-    }
-
-    public void Save(string path)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        File.WriteAllText(path, JsonSerializer.Serialize(this, Options));
-    }
-
-    public string ToJson() => JsonSerializer.Serialize(this, Options);
-
-    public static ServerConfig FromJson(string json)
-        => JsonSerializer.Deserialize<ServerConfig>(json, Options) ?? new ServerConfig();
-
-    /// <summary>
-    /// Applies <c>--key value</c> command-line overrides onto this config. Used to embed/launch
-    /// the server programmatically â€” e.g. the Unity client's local singleplayer host passes a
-    /// port, a private saves dir and the data dir. Unknown keys are ignored; missing trailing
-    /// values are safe. Returns the canonical names of the keys that were applied.
-    /// </summary>
-    public IReadOnlyList<string> ApplyCommandLine(string[]? args)
-    {
-        var applied = new List<string>();
-        if (args is null)
-        {
-            return applied;
-        }
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            var key = args[i];
-            if (string.IsNullOrEmpty(key) || !key.StartsWith("--", StringComparison.Ordinal) || i + 1 >= args.Length)
-            {
-                continue;
-            }
-
-            var value = args[++i]; // consume the value
-            switch (key.Substring(2).ToLowerInvariant())
-            {
-                case "port":
-                case "gameplay-port":
-                    if (int.TryParse(value, out var gp)) { GameplayPort = gp; applied.Add("port"); }
-                    break;
-                case "admin-port":
-                    if (int.TryParse(value, out var ap)) { AdminPort = ap; applied.Add("admin-port"); }
-                    break;
-                case "saves":
-                case "saves-root":
-                    SavesRoot = value; applied.Add("saves");
-                    break;
-                case "data":
-                case "data-dir":
-                    DataDir = value; applied.Add("data");
-                    break;
-                case "usercontent":
-                case "user-content":
-                    UserContentDir = value; applied.Add("usercontent");
-                    break;
-                case "no-config":
-                    // Handled earlier: ServerConfig.LoadForStartup reads --no-config straight from the raw
-                    // args (before Load) to skip the config file entirely. Recognized here only so its value
-                    // token is consumed and can't shadow a following flag; nothing to apply to this config.
-                    break;
-                case "stdin-stop":
-                    // Handled in Program.cs (reads --stdin-stop straight from the raw args to arm the stdin
-                    // graceful-shutdown watcher for the bundled singleplayer host). Recognized here only so its
-                    // value token is consumed and can't shadow a following flag; nothing to apply to this config.
-                    break;
-                case "database":
-                case "database-provider":
-                    DatabaseProvider = value; applied.Add("database-provider");
-                    break;
-                case "postgres":
-                case "postgres-connection":
-                case "postgres-connection-string":
-                    PostgresConnectionString = value; applied.Add("postgres-connection-string");
-                    break;
-                case "world":
-                case "world-name":
-                    WorldName = value; applied.Add("world");
-                    break;
-                case "name":
-                case "server-name":
-                    ServerName = value; applied.Add("name");
-                    break;
-                case "max-players":
-                    if (int.TryParse(value, out var mp)) { MaxPlayers = mp; applied.Add("max-players"); }
-                    break;
-                case "view-distance":
-                case "view-distance-chunks":
-                    if (int.TryParse(value, out var vd)) { ViewDistanceChunks = vd; applied.Add("view-distance"); }
-                    break;
-                case "chunk-stream-per-tick":
-                    if (int.TryParse(value, out var cspt) && cspt >= 1) { ChunkStreamPerTick = cspt; applied.Add("chunk-stream-per-tick"); }
-                    break;
-                case "chunk-stream-budget-ms":
-                case "chunk-budget-ms":
-                    if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var csb) && csb >= 0) { ChunkStreamBudgetMs = csb; applied.Add("chunk-stream-budget-ms"); }
-                    break;
-                case "free-flight":
-                    if (bool.TryParse(value, out var ff)) { Rules.FreeSpaceFlight = ff; applied.Add("free-flight"); }
-                    break;
-                case "space-combat":
-                    if (Enum.TryParse<SpaceCombatMode>(value, ignoreCase: true, out var sc)) { Rules.SpaceCombat = sc; applied.Add("space-combat"); }
-                    break;
-                case "ship-weapons":
-                    if (Enum.TryParse<ShipWeaponMode>(value, ignoreCase: true, out var sw)) { Rules.ShipWeapons = sw; applied.Add("ship-weapons"); }
-                    break;
-                case "space-npcs":
-                    if (Enum.TryParse<AlienActivity>(value, ignoreCase: true, out var sn)) { Rules.SpaceNpcEnemies = sn; applied.Add("space-npcs"); }
-                    break;
-                case "password":
-                    ServerPassword = value; applied.Add("password");
-                    break;
-                case "admins":
-                case "admin-players":
-                    // Comma-separated player names granted the Admin role on join (in-game hosting
-                    // passes the host's name so the host is always admin, even on older saves).
-                    AdminPlayers = SplitNames(value); applied.Add("admins");
-                    break;
-                case "fleet-admins":
-                    // Comma-separated player names granted fleet admin (observer mode). See FleetAdminPlayers.
-                    FleetAdminPlayers = SplitNames(value); applied.Add("fleet-admins");
-                    break;
-                case "seed":
-                    if (long.TryParse(value, out var sd)) { Seed = sd; applied.Add("seed"); }
-                    break;
-                case "start-planet":
-                    // Planet type the world spawns on (an unknown key falls back to the worldgen default).
-                    if (!string.IsNullOrWhiteSpace(value)) { StartPlanet = value.Trim(); applied.Add("start-planet"); }
-                    break;
-                case "admin-bind":
-                    AdminBindAddress = value; applied.Add("admin-bind");
-                    break;
-                case "game-mode":
-                    // True sandbox (issue #662): "Creative" makes crafting free, disables oxygen/hunger and
-                    // keeps planet enemies/bandits off (both gate on Survival). Passed by the launcher only
-                    // at world creation â€” thereafter the save's baked RulesOverride carries the mode.
-                    if (Enum.TryParse<GameMode>(value, ignoreCase: true, out var gm))
-                    {
-                        Rules.GameMode = gm;
-                        // A Creative/Sandbox world flies â€” that is what the mode name promises to anyone
-                        // arriving from Minecraft. An explicit --creative-flight after this still wins.
-                        Rules.CreativeFlight = gm == GameMode.Creative;
-                        applied.Add("game-mode");
-                    }
-
-                    break;
-                case "creative-flight":
-                    // Free flight for everyone in this world, independent of the game mode â€” the launcher
-                    // passes it for the "Creative" head-start mode too, which stays Survival otherwise.
-                    if (bool.TryParse(value, out var cf)) { Rules.CreativeFlight = cf; applied.Add("creative-flight"); }
-                    break;
-                case "admin-cheats":
-                    // Allow admin cheat commands (/tp, /give, /fly â€¦) in every game mode. Passed by the
-                    // bundled singleplayer/host launcher, where the solo player is the WorldAdmin anyway;
-                    // guests on a hosted world are still blocked by the admin role. Dedicated servers keep
-                    // the off default unless the operator opts in (#642).
-                    if (bool.TryParse(value, out var ac))
-                    {
-                        Rules.AdminCheats = ac;
-                        Rules.AllowCheatsInSurvival = ac;
-                        applied.Add("admin-cheats");
-                    }
-
-                    break;
-                case "voice":
-                case "voice-chat":
-                    if (bool.TryParse(value, out var vc)) { VoiceChatEnabled = vc; applied.Add("voice"); }
-                    break;
-                case "unlock-all-blueprints":
-                    if (bool.TryParse(value, out var uab)) { CreativeUnlockAllBlueprints = uab; applied.Add("unlock-all-blueprints"); }
-                    break;
-                case "start-all-ships":
-                    if (bool.TryParse(value, out var sas)) { CreativeStartAllShips = sas; applied.Add("start-all-ships"); }
-                    break;
-                case "creative-kit":
-                    if (bool.TryParse(value, out var ck)) { CreativeStarterKit = ck; applied.Add("creative-kit"); }
-                    break;
-                case "guarantee-start-cube":
-                    if (bool.TryParse(value, out var gsc)) { GuaranteeStartDataCube = gsc; applied.Add("guarantee-start-cube"); }
-                    break;
-
-                // --- World options (creation-time; the server bakes them into the save's metadata) ---
-                case "creatures":
-                    if (Enum.TryParse<AlienActivity>(value, ignoreCase: true, out var ca)) { Rules.CreatureAbundance = ca; applied.Add("creatures"); }
-                    break;
-                case "planet-enemies":
-                    if (Enum.TryParse<AlienActivity>(value, ignoreCase: true, out var pe)) { Rules.PlanetEnemies = pe; applied.Add("planet-enemies"); }
-                    break;
-                case "ufos":
-                    if (Enum.TryParse<AlienActivity>(value, ignoreCase: true, out var uf)) { Rules.AlienUfos = uf; applied.Add("ufos"); }
-                    break;
-                case "bandits":
-                    if (Enum.TryParse<AlienActivity>(value, ignoreCase: true, out var ba)) { Rules.Bandits = ba; applied.Add("bandits"); }
-                    break;
-                case "oxygen":
-                    if (Enum.TryParse<OxygenConsumption>(value, ignoreCase: true, out var ox)) { Rules.OxygenConsumption = ox; applied.Add("oxygen"); }
-                    break;
-                case "hunger":
-                    // Accept the new difficulty tier (Off/Slow/Normal/Fast) and, for backward compatibility with
-                    // existing configs/saves, the legacy boolean (true â†’ Normal, false â†’ Off).
-                    if (Enum.TryParse<HungerConsumption>(value, ignoreCase: true, out var hg)) { Rules.HungerConsumption = hg; applied.Add("hunger"); }
-                    else if (bool.TryParse(value, out var hgb)) { Rules.HungerConsumption = hgb ? HungerConsumption.Normal : HungerConsumption.Off; applied.Add("hunger"); }
-                    break;
-                case "hazards":
-                    if (Enum.TryParse<HazardLevel>(value, ignoreCase: true, out var hz)) { Rules.EnvironmentalHazards = hz; applied.Add("hazards"); }
-                    break;
-                case "death-penalty":
-                    if (Enum.TryParse<DeathPenalty>(value, ignoreCase: true, out var dp)) { Rules.DeathPenalty = dp; applied.Add("death-penalty"); }
-                    break;
-                case "keep-inventory":
-                    if (bool.TryParse(value, out var ki)) { Rules.KeepInventoryOnDeath = ki; applied.Add("keep-inventory"); }
-                    break;
-                case "keep-ship":
-                    if (bool.TryParse(value, out var ks)) { Rules.KeepShipOnDeath = ks; applied.Add("keep-ship"); }
-                    break;
-                case "auto-aim":
-                    // #693: manual aiming â€” weapons only hit what is under the crosshair when off.
-                    if (bool.TryParse(value, out var aa)) { Rules.AutoAim = aa; applied.Add("auto-aim"); }
-                    break;
-                case "story":
-                    Rules.StoryId = value; applied.Add("story"); // pack id, "none" for sandbox, or "default"/empty
-                    break;
-                case "story-density":
-                    if (Enum.TryParse<StoryDensity>(value, ignoreCase: true, out var storyDens)) { Rules.StoryDensity = storyDens; applied.Add("story-density"); }
-                    break;
-                case "flora":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var fl)) { World.FloraDensity = fl; applied.Add("flora"); }
-                    break;
-                case "ore":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var or)) { World.RareResources = or; applied.Add("ore"); }
-                    break;
-                case "settlements":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var se)) { World.Settlements = se; applied.Add("settlements"); }
-                    break;
-                case "planet-wrecks":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var pw)) { World.PlanetWrecks = pw; applied.Add("planet-wrecks"); }
-                    break;
-                case "vaults":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var va)) { World.Vaults = va; applied.Add("vaults"); }
-                    break;
-                case "stations":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var sf)) { World.SpaceStations = sf; applied.Add("stations"); }
-                    break;
-                case "exotic":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var ex)) { World.ExoticWorlds = ex; applied.Add("exotic"); }
-                    break;
-                case "station-templates":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var st)) { World.StationTemplateUse = st; applied.Add("station-templates"); }
-                    break;
-                case "settlement-templates":
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var set)) { World.SettlementTemplateUse = set; applied.Add("settlement-templates"); }
-                    break;
-                case "structure-packs":
-                    // The enabled structure-template packs ("a,b"); empty arg â‡’ all packs (the default).
-                    // The "__none__" sentinel means "no packs" (the picker turned everything off), which we
-                    // keep as a single non-matching entry so no template is ever rolled.
-                    var packList = new System.Collections.Generic.List<string>();
-                    foreach (var p in value.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        var trimmed = p.Trim();
-                        if (trimmed.Length > 0)
-                        {
-                            packList.Add(trimmed);
-                        }
-                    }
-
-                    World.EnabledStructurePacks = packList;
-                    applied.Add("structure-packs");
-                    break;
-                case "systems":
-                    if (int.TryParse(value, out var sy)) { World.StarSystemCount = Math.Clamp(sy, 1, 32); applied.Add("systems"); }
-                    break;
-                case "planets-min":
-                    if (int.TryParse(value, out var pmin))
-                    {
-                        World.PlanetsPerSystemMin = Math.Clamp(pmin, 1, 10);
-                        // Keep min â‰¤ max no matter the arg order: DeterministicRandom.Range silently
-                        // returns min when max < min, which would bypass the max clamp entirely.
-                        World.PlanetsPerSystemMax = Math.Max(World.PlanetsPerSystemMax, World.PlanetsPerSystemMin);
-                        applied.Add("planets-min");
-                    }
-
-                    break;
-                case "planets-max":
-                    if (int.TryParse(value, out var pmax))
-                    {
-                        World.PlanetsPerSystemMax = Math.Clamp(pmax, 1, 12);
-                        World.PlanetsPerSystemMin = Math.Min(World.PlanetsPerSystemMin, World.PlanetsPerSystemMax);
-                        applied.Add("planets-max");
-                    }
-
-                    break;
-                case "moons-max":
-                    // Cap raised 5 â†’ 8 (#546): the Lone Giant archetype carries up to 8 moons, so the
-                    // explicit slider may reach the same ceiling.
-                    if (int.TryParse(value, out var mm)) { World.MoonsPerPlanetMax = Math.Clamp(mm, 0, 8); applied.Add("moons-max"); }
-                    break;
-                case "variance":
-                    // System archetype variance (#546). On for every new world by default; "off" is the
-                    // escape hatch for tests/captures that need the classic uniform layout.
-                    if (bool.TryParse(value, out var sv)) { World.SystemVariance = sv; applied.Add("variance"); }
-                    else if (string.Equals(value, "on", StringComparison.OrdinalIgnoreCase)) { World.SystemVariance = true; applied.Add("variance"); }
-                    else if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase)) { World.SystemVariance = false; applied.Add("variance"); }
-                    break;
-                case "belts":
-                    // Asteroid-belt layout (#683). On for every new world by default; "off" restores the
-                    // classic scattered-asteroid disc (same escape-hatch role as "variance").
-                    if (bool.TryParse(value, out var ab)) { World.AsteroidBelts = ab; applied.Add("belts"); }
-                    else if (string.Equals(value, "on", StringComparison.OrdinalIgnoreCase)) { World.AsteroidBelts = true; applied.Add("belts"); }
-                    else if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase)) { World.AsteroidBelts = false; applied.Add("belts"); }
-                    break;
-                case "continents":
-                    // Continents & real oceans (#704). On for every new world by default; "off" restores
-                    // the classic noise-coast terrain (same escape-hatch role as "variance"/"belts").
-                    if (bool.TryParse(value, out var tc)) { World.TerrainContinents = tc; applied.Add("continents"); }
-                    else if (string.Equals(value, "on", StringComparison.OrdinalIgnoreCase)) { World.TerrainContinents = true; applied.Add("continents"); }
-                    else if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase)) { World.TerrainContinents = false; applied.Add("continents"); }
-                    break;
-                case "danger":
-                    // Global hostility multiplier (#547) â€” scales space-ambush odds + bandit-camp presence.
-                    if (Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(value, ignoreCase: true, out var dg)) { World.Danger = dg; applied.Add("danger"); }
-                    break;
-                case "planet-types":
-                    // Advanced per-type page: "corrupted=Rare,ocean=Frequent,..." (unknown keys are ignored
-                    // by the universe generator; an empty dict keeps the data-driven spawn weights).
-                    foreach (var pair in value.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                    {
-                        var kv = pair.Split('=', 2);
-                        if (kv.Length == 2 && Enum.TryParse<BlocksBeyondTheStars.Shared.World.Frequency>(kv[1].Trim(), ignoreCase: true, out var tf))
-                        {
-                            World.PlanetTypeFrequencies[kv[0].Trim()] = tf;
-                        }
-                    }
-
-                    applied.Add("planet-types");
-                    break;
-            }
-        }
-
-        return applied;
-    }
-
-    /// <summary>
-    /// Applies <c>BBS_*</c> environment-variable overrides onto this config â€” the configuration
-    /// channel used when running in a container (Docker/Compose/Kubernetes), where mounting a
-    /// <c>server.json</c> is awkward. Precedence is <c>server.json</c> &lt; environment &lt;
-    /// command-line, so call this after <see cref="Load"/> and before <see cref="ApplyCommandLine"/>.
-    /// Empty/unset variables are ignored; unparseable values are skipped. Returns the canonical
-    /// names of the keys that were applied.
-    /// </summary>
-    public IReadOnlyList<string> ApplyEnvironment()
-    {
-        var applied = new List<string>();
-
-        static string? Env(string name)
-        {
-            var v = Environment.GetEnvironmentVariable(name);
-            return string.IsNullOrEmpty(v) ? null : v;
-        }
-
-        if (Env("BBS_SERVER_NAME") is { } serverName) { ServerName = serverName; applied.Add("BBS_SERVER_NAME"); }
-        if (Env("BBS_WORLD") is { } world) { WorldName = world; applied.Add("BBS_WORLD"); }
-        if ((Env("BBS_PORT") ?? Env("BBS_GAMEPLAY_PORT")) is { } portStr && int.TryParse(portStr, out var port)) { GameplayPort = port; applied.Add("BBS_PORT"); }
-        if (Env("BBS_ADMIN_PORT") is { } adminPortStr && int.TryParse(adminPortStr, out var adminPort)) { AdminPort = adminPort; applied.Add("BBS_ADMIN_PORT"); }
-        if (Env("BBS_MAX_PLAYERS") is { } maxStr && int.TryParse(maxStr, out var max)) { MaxPlayers = max; applied.Add("BBS_MAX_PLAYERS"); }
-        if ((Env("BBS_PASSWORD") ?? Env("BBS_SERVER_PASSWORD")) is { } pw) { ServerPassword = pw; applied.Add("BBS_PASSWORD"); }
-        if (Env("BBS_ADMINS") is { } admins) { AdminPlayers = SplitNames(admins); applied.Add("BBS_ADMINS"); }
-        if (Env("BBS_FLEET_ADMINS") is { } fleetAdmins) { FleetAdminPlayers = SplitNames(fleetAdmins); applied.Add("BBS_FLEET_ADMINS"); }
-        if (Env("BBS_ADMIN_PASSWORD") is { } adminPw) { AdminPassword = adminPw; applied.Add("BBS_ADMIN_PASSWORD"); }
-        if (Env("BBS_ADMIN_BIND") is { } adminBind) { AdminBindAddress = adminBind; applied.Add("BBS_ADMIN_BIND"); }
-        if (Env("BBS_ENABLE_WEBSOCKET") is { } wsStr && bool.TryParse(wsStr, out var ws)) { EnableWebSocket = ws; applied.Add("BBS_ENABLE_WEBSOCKET"); }
-        if (Env("BBS_WEBSOCKET_BIND") is { } wsBind) { WebSocketBindAddress = wsBind; applied.Add("BBS_WEBSOCKET_BIND"); }
-        if (Env("BBS_SAVES") is { } saves) { SavesRoot = saves; applied.Add("BBS_SAVES"); }
-        if (Env("BBS_DATA") is { } data) { DataDir = data; applied.Add("BBS_DATA"); }
-        if (Env("BBS_USERCONTENT") is { } userContent) { UserContentDir = userContent; applied.Add("BBS_USERCONTENT"); }
-        if ((Env("BBS_DATABASE_PROVIDER") ?? Env("BBS_DATABASE")) is { } databaseProvider) { DatabaseProvider = databaseProvider; applied.Add("BBS_DATABASE_PROVIDER"); }
-        if ((Env("BBS_POSTGRES_CONNECTION_STRING") ?? Env("DATABASE_URL")) is { } pg) { PostgresConnectionString = pg; applied.Add("BBS_POSTGRES_CONNECTION_STRING"); }
-        if (Env("BBS_SEED") is { } seedStr && long.TryParse(seedStr, out var seed)) { Seed = seed; applied.Add("BBS_SEED"); }
-        if (Env("BBS_START_PLANET") is { } startPlanet) { StartPlanet = startPlanet.Trim(); applied.Add("BBS_START_PLANET"); }
-        if (Env("BBS_TICK_RATE") is { } tickStr && int.TryParse(tickStr, out var tick)) { TickRate = tick; applied.Add("BBS_TICK_RATE"); }
-        if (Env("BBS_VIEW_DISTANCE") is { } vdStr && int.TryParse(vdStr, out var vd)) { ViewDistanceChunks = vd; applied.Add("BBS_VIEW_DISTANCE"); }
-        if (Env("BBS_CHUNK_STREAM_PER_TICK") is { } csptStr && int.TryParse(csptStr, out var cspt) && cspt >= 1) { ChunkStreamPerTick = cspt; applied.Add("BBS_CHUNK_STREAM_PER_TICK"); }
-        if (Env("BBS_CHUNK_STREAM_BUDGET_MS") is { } csbStr && double.TryParse(csbStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var csb) && csb >= 0) { ChunkStreamBudgetMs = csb; applied.Add("BBS_CHUNK_STREAM_BUDGET_MS"); }
-        if (Env("BBS_FREE_FLIGHT") is { } ffStr && bool.TryParse(ffStr, out var ff)) { Rules.FreeSpaceFlight = ff; applied.Add("BBS_FREE_FLIGHT"); }
-        if (Env("BBS_SPACE_COMBAT") is { } scStr && Enum.TryParse<SpaceCombatMode>(scStr, ignoreCase: true, out var sc)) { Rules.SpaceCombat = sc; applied.Add("BBS_SPACE_COMBAT"); }
-        if (Env("BBS_SHIP_WEAPONS") is { } swStr && Enum.TryParse<ShipWeaponMode>(swStr, ignoreCase: true, out var sw)) { Rules.ShipWeapons = sw; applied.Add("BBS_SHIP_WEAPONS"); }
-        if (Env("BBS_SPACE_NPCS") is { } snStr && Enum.TryParse<AlienActivity>(snStr, ignoreCase: true, out var sn)) { Rules.SpaceNpcEnemies = sn; applied.Add("BBS_SPACE_NPCS"); }
-        if (Env("BBS_BANDITS") is { } bnStr && Enum.TryParse<AlienActivity>(bnStr, ignoreCase: true, out var bn)) { Rules.Bandits = bn; applied.Add("BBS_BANDITS"); }
-        if (Env("BBS_AI_LEVEL") is { } aiStr && Enum.TryParse<AiLevel>(aiStr, ignoreCase: true, out var ai)) { AiLevel = ai; applied.Add("BBS_AI_LEVEL"); }
-        if (Env("BBS_AI_BACKEND_URL") is { } aiUrl) { AiBackendUrl = aiUrl; applied.Add("BBS_AI_BACKEND_URL"); }
-        if (Env("BBS_AI_TIMEOUT_SECONDS") is { } aiToStr && int.TryParse(aiToStr, out var aiTo) && aiTo > 0) { AiTimeoutSeconds = aiTo; applied.Add("BBS_AI_TIMEOUT_SECONDS"); }
-        if (Env("BBS_CRASH_REPORT_ENDPOINT") is { } crashUrl) { CrashReportEndpoint = crashUrl; applied.Add("BBS_CRASH_REPORT_ENDPOINT"); }
-        if (Env("BBS_CRASH_REPORT_KEY") is { } crashKey) { CrashReportApiKey = crashKey; applied.Add("BBS_CRASH_REPORT_KEY"); }
-        if (Env("BBS_NOTIFY_URL") is { } notifyUrl) { NotifyUrl = notifyUrl; applied.Add("BBS_NOTIFY_URL"); }
-        if (Env("BBS_BLOCKED_WORDS") is { } blockedWords) { BlockedNameWords.AddRange(SplitNames(blockedWords)); applied.Add("BBS_BLOCKED_WORDS"); }
-        if (Env("BBS_WATCH_WORDS") is { } watchWords) { WatchNameWords.AddRange(SplitNames(watchWords)); applied.Add("BBS_WATCH_WORDS"); }
-        if (Env("BBS_VOICE") is { } voiceStr && bool.TryParse(voiceStr, out var voice)) { VoiceChatEnabled = voice; applied.Add("BBS_VOICE"); }
-        if (Env("BBS_IDLE_SHUTDOWN_MINUTES") is { } idleStr && int.TryParse(idleStr, out var idle)) { IdleShutdownMinutes = idle; applied.Add("BBS_IDLE_SHUTDOWN_MINUTES"); }
-        if (Env("BBS_JOIN_TOKEN_SECRET") is { } joinSecret) { JoinTokenSecret = joinSecret; applied.Add("BBS_JOIN_TOKEN_SECRET"); }
-        if (Env("BBS_WORLD_OWNER") is { } worldOwner) { WorldOwnerAccountId = worldOwner; applied.Add("BBS_WORLD_OWNER"); }
-        if (Env("BBS_ANNOUNCE_TOKEN") is { } announceToken) { AnnounceToken = announceToken; applied.Add("BBS_ANNOUNCE_TOKEN"); }
-
-        return applied;
-    }
-
-    /// <summary>Splits a comma-separated name list, trimming entries and dropping empties.</summary>
-    private static List<string> SplitNames(string value)
-        => value.Split(',').Select(n => n.Trim()).Where(n => n.Length > 0).ToList();
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×Ÿ6õ:-jZ.¶›­–)Ş³Ròò&Æö6·2&W–öæBF†R7F'2(	B6÷—&–v‡B†2’##b§W7GW2L;ÇG66†W"bÖ&6VÂL;ÇG66†W"„§TÖfRvÖW2¢òò5E‚ÔÆ–6Vç6RÔ–FVçF–f–W#¢uÂÓ2ãÖ÷"ÖÆFW ¢òòF†—2f–ÆR—2'Böb&Æö6·2&W–öæBF†R7F'2â6VRÄ”4Tå4Rf÷"F†RgVÆÂuÂÓ2ãFW‡Bà§W6–ær7—7FVÒåFW‡Bä§6öã°§W6–ær7—7FVÒåFW‡Bä§6öâå6W&–Æ—¦F–öã° ¦æÖW76R&Æö6·4&W–öæEF†U7F'2å6†&VBä6öæf–wW&F–öã° ¢òòòÇ7VÖÖ'“à¢òòò6VÆbÖ†÷7F–ær6W'fW"6öæf–wW&F–öâ‡FV6†æ–6Â&WV—&VÖVçG2*sB’âÆöFVBg&öĞ¢òòòÆ3æ6öæf–r÷6W'fW"æ§6öãÂö3ã²6†&VB'’F†RvÖR6W'fW"æBF†RFÖ–âvV"T’Âæ@¢òòòVF—F&ÆRF‡&÷Vv‚F†RFÖ–âT’à¢òòòÂ÷7VÖÖ'“à§V&Æ–26VÆVB6Æ726W'fW$6öæf–p§°¢V&Æ–26öç7B–çBFVfVÇDvÖWÆ•÷'BÒ3CS°¢V&Æ–26öç7B–çBFVfVÇDFÖ–å÷'BÒ3Cc° ¢V&Æ–27G&–ær6W'fW$æÖR²vWC²6WC²ÒÒ$&Æö6·2&W–öæBF†R7F'26W'fW"#°¢V&Æ–27G&–ærv÷&ÆDæÖR²vWC²6WC²ÒÒ'v÷&ÆEó#° ¢V&Æ–2–çBvÖWÆ•÷'B²vWC²6WC²ÒÒFVfVÇDvÖWÆ•÷'C°¢V&Æ–2–çBFÖ–å÷'B²vWC²6WC²ÒÒFVfVÇDFÖ–å÷'C° ¢òòòÇ7VÖÖ'“äÇ6ò66WB'&÷w6W"6Æ–VçG2÷fW"vV%6ö6¶WB†öâF†RvÖWÆ’÷'BÂD5’ãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂVæ&ÆUvV%6ö6¶WB²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“åvV%6ö6¶WB&–æB†÷7B‚&Æö6Æ†÷7B"ôÄâ—f÷"6fWG’Â"²"f÷"ÆÂ–çFW&f6W2’ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ærvV%6ö6¶WD&–æDFG&W72²vWC²6WC²ÒÒ&Æö6Æ†÷7B#° ¢V&Æ–2–çBÖ…Æ–W'2²vWC²6WC²ÒÒ#°¢V&Æ–27G&–ær6W'fW%77v÷&B²vWC²6WC²ÒÒ7G&–æräV×G“°¢V&Æ–2&ööÂv†—FVÆ—7DVæ&ÆVB²vWC²6WC²Ğ¢V&Æ–2Æ—7CÇ7G&–æsâv†—FVÆ—7B²vWC²6WC²ÒÒæWr‚“°¢V&Æ–27G&–ærFÖ–å77v÷&B²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“åÆ–W"æÖW2w&çFVBF†RFÖ–â&öÆRöâ¦ö–â‡F†Rv÷&ÆB7&VF÷"&V6öÖW2v÷&ÆDFÖ–â’ãÂ÷7VÖÖ'“à¢V&Æ–2Æ—7CÇ7G&–æsâFÖ–åÆ–W'2²vWC²6WC²ÒÒæWr‚“° ¢òòòÇ7VÖÖ'“åÆ–W"æÖW2w&çFVBÆ#æfÆVWBFÖ–ãÂö#âöâ¦ö–â(	BF†R÷W&F÷"öbF†R†÷7F–ær–ç7FÆÆF–öâÀ¢òòò2÷÷6VBFòF†R÷væW"öbâ–æF—f–GVÂv÷&ÆBâfÆVWBFÖ–ç2&RF†RöæÇ’öæW2v†òÖ’VçFW"F†P¢òòò–çf—6–&ÆRö'6W'fW"ÖöFR†—77VR3Cƒr’Â&V6W6RF†B÷vW"&V6†W2–çFòv÷&ÆG2÷F†W"V÷ÆR÷vâà¢òòğ¢òòòÇ&äFVÆ–&W&FVÇ’äõBÇ6VR7&VcÒ%6†&VBå7FFRåÆ–W%&öÆR"óâfÇVS¢&öÆW2Æ—fR–à¢òòòÇ6VR7&VcÒ%6†&VBå7FFRåÆ–W%7FFRå&öÆR"óâæB&RW'6—7FVB–âF†R6fRÂæB6fW26â&RF÷væÆöFVBÀ¢òòòVF—FVBæB&R×WÆöFVB'’Æ–W'2âW'6—7FVBfÆVWB&öÆRv÷VÆBF†W&Vf÷&RG&fVÂ–çFòv÷&ÆG2F†P¢òòò÷W&F÷"FöW2æ÷B6öçG&öÂâF†—2Æ—7B—26öæf–rÖöæÇ’æB&RÖWfÇVFVBöâWfW'’¦ö–âãÂ÷&ãÂ÷7VÖÖ'“à¢V&Æ–2Æ—7CÇ7G&–æsâfÆVWDFÖ–åÆ–W'2²vWC²6WC²ÒÒæWr‚“° ¢V&Æ–2–çBWFõ6fT–çFW'fÄÖ–çWFW2²vWC²6WC²ÒÒS°¢V&Æ–2–çB&6·W–çFW'fÄÖ–çWFW2²vWC²6WC²ÒÒc° ¢V&Æ–2–çBf–WtF—7Fæ6T6‡Væ·2²vWC²6WC²ÒÒC°¢V&Æ–2–çBÖ„ÆöFVD6‡Væ·5W%Æ–W"²vWC²6WC²ÒÒ#Sc° ¢òòòÇ7VÖÖ'“ä†÷rÖç’6‡Væ·2F†R6W'fW"7G&V×2FòV6‚Æ–W"W"F–6²â&—6VBg&öÒF†R†—7F÷&–6Â†&BÖ6öFV@¢òòò"Fò¶VWF†R†Æ&vW"ÂFVfVÇBÓB’f–Wrf–ÆÆ–ær&ö×FÇ’(	Bv–FW"f–WrF—7Fæ6R†2VG&F–6ÆÇ’Ö÷&P¢òòò6‡Væ·2Fò6VæBÂ6òFöò×6ÖÆÂ'VFvWBÖ¶W2FW'&–â'F†r–â"6Æ÷vÇ’BF†R†÷&—¦öââV6‚g&W6†Ç’7G&VÖV@¢òòò6‡Væ²F†B—6âwB66†VB—2vVæW&FVB7–æ6‡&öæ÷W6Ç’–âF†RF–6²Â6òF†—2Ç6ò&÷VæG2f—'7B×f—6—BvVâ6÷7C ¢òòò†÷7B6VV–ærF–6²÷fW''Vç2öâvV²†&Gv&R6âÆ÷vW"—C²7G&öær†÷7B6â&—6R—Bf÷"6æ–W"f–ÆÂãÂ÷7VÖÖ'“à¢V&Æ–2–çB6‡Væµ7G&VÕW%F–6²²vWC²6WC²ÒÒc° ¢òòòÇ7VÖÖ'“ä÷F–öæÂvÆÂÖ6Æö6²'VFvWB†Ö–ÆÆ—6V6öæG2’f÷"6‡Væ²7G&VÖ–ærW"F–6³²Òöfbâv†Vâ6WBÀ¢òòò7G&VÔ6‡Væ·27F÷26VæF–æröæ6RF†R'VFvWB—27VçB(	B&VÖ–æ–ær6‡Væ·26öÖRæW‡BF–6²ÂæV&W7BÖf—'7@¢òòò÷&FW"Væ6†ævVBâÖVçBf÷"†÷7G2v†W&RF†RF–6²6†&W2F‡&VBv—F‚&VæFW&–ær‡F†R–âÖ'&÷w6W ¢òòò6–ævÆWÆ–W"“¢6†VF–6²7F–ÆÂ7G&V×2F†RgVÆÂ6‡Væµ7G&VÕW%F–6²Â'WB'W'7BöbW‡Vç6—fP¢òòòf—'7B×f—6—BvVæW&F–öç26âwB7FÆÂF†Rg&ÖRâFVF–6FVB6W'fW'2ÆVfRF†—2öfbãÂ÷7VÖÖ'“à¢V&Æ–2F÷V&ÆR6‡Væµ7G&VÔ'VFvWD×2²vWC²6WC²Ğ ¢V&Æ–27G&–ærF–ff–7VÇG’²vWC²6WC²ÒÒ&æ÷&ÖÂ#°¢V&Æ–2&ööÂÆÆ÷twVW7G2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“ä&–æBFG&W72f÷"F†RFÖ–âT“²FVfVÇG2FòÆö÷&6²6ò—B—2æ÷BV&Æ–2Œ*s2ã2’ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ærFÖ–ä&–æDFG&W72²vWC²6WC²ÒÒ##rããã#° ¢òòòÇ7VÖÖ'“å6W'fW"6–×VÆF–öâF–6²&FR–â‡¢ƒ(	3#&V6öÖÖVæFVBÂ*srã"’ãÂ÷7VÖÖ'“à¢V&Æ–2–çBF–6µ&FR²vWC²6WC²ÒÒS° ¢òòòÇ7VÖÖ'“äÆöærv÷&ÆB6VVC²ÖVç2&FW&—fRöæRg&öÒF†Rv÷&ÆBæÖR"ãÂ÷7VÖÖ'“à¢V&Æ–2Æöær6VVB²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“åÆæWBG—RF†Rv÷&ÆB7F'G2öââF†RFVfVÇB—2'&VF†&ÆRÂfW'F–ÆRG—R6òæWp¢òòòÆ–W"&Vv–ç2v—F‚—"ÂfööBÆçG2æBF†R6öÖÖöâ÷&W2†æ÷BF÷†–27W'f—fÂ×&W77W&Rv÷&ÆB’ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær7F'EÆæWB²vWC²6WC²ÒÒ'f&–VB#° ¢òòòÇ7VÖÖ'“äWF†÷&—FF—fRv÷&ÆB'VÆW2†ÖöFRÂeÂ†¦&G2ÂFVF‚VæÇG’Â6†VG2Ââââ’ãÂ÷7VÖÖ'“à¢V&Æ–2vÖU'VÆW2'VÆW2²vWC²6WC²ÒÒæWr‚“° ¢òòòÇ7VÖÖ'“åVæ—fW'6RFW67&—F–öâW6VBv†Vâf—'7B7&VF–ærF†Rv÷&ÆBâ7—7FVÒf&–æ6R‚3SCb’æ@¢òòò7FW&ö–B&VÇG2‚3cƒ2’&Röâ†W&R(	BWfW'’äUtÅ’7&VFVBv÷&ÆBvWG2&6†WG—R×f&–VB7F"7—7FV×0¢òòòv†÷6R7FW&ö–G26†&R&VÂ&VÇBæçVÆ’(	Bv†–ÆRF†P¢òòòÇ6VR7&VcÒ$&Æö6·4&W–öæEF†U7F'2å6†&VBåv÷&ÆBåv÷&ÆDFW67&—F–öâå7—7FVÕf&–æ6R"óâæ@¢òòòÇ6VR7&VcÒ$&Æö6·4&W–öæEF†U7F'2å6†&VBåv÷&ÆBåv÷&ÆDFW67&—F–öâä7FW&ö–D&VÇG2"óâ&÷W'F–W0¢òòòFVfVÇBFòfÇ6RÂ6òÆöFVB6fRv†÷6RÖWFFF&VFFW2F†RfVGW&W27F—2'—FRÖ–FVçF–6ÂãÂ÷7VÖÖ'“à¢V&Æ–2&Æö6·4&W–öæEF†U7F'2å6†&VBåv÷&ÆBåv÷&ÆDFW67&—F–öâv÷&ÆB²vWC²6WC²ÒÒæWr‚’²7—7FVÕf&–æ6RÒG'VRÂ7FW&ö–D&VÇG2ÒG'VRÂFW'&–ä6öçF–æVçG2ÒG'VRÓ° ¢òòòÇ7VÖÖ'“ä÷F–öæÂ’Ö—76–öâ&6¶VæBÆWfVÂ„öfb¶VW2F†RvÖRgVÆÇ’’Ög&VR’ãÂ÷7VÖÖ'“à¢V&Æ–2”ÆWfVÂ”ÆWfVÂ²vWC²6WC²ÒÒ”ÆWfVÂäöfc° ¢òòòÇ7VÖÖ'“ä&6RU$ÂöbF†R÷F–öæÂ—F†öâ’&6¶VæB‡W6VBv†VâÇ6VR7&VcÒ$”ÆWfVÂ"óâ—2æ÷Böfb’ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær”&6¶VæEW&Â²vWC²6WC²ÒÒ&‡GG¢òó#rããã£ƒsr#° ¢òòòÇ7VÖÖ'“ä…EEF–ÖV÷WB‡6V6öæG2’f÷"’Ö&6¶VæB6ÆÇ2âvVæW&÷W2'’FW6–vã¢Æ–W'2æWfW"v—Böà¢òòò’‡F†W’Çv—2vWBâ–ç7FçB7FF–2÷FV×ÆFRÆ–æS²F†RÄÄÒÆ–æRWw&FW2—B7–æ6‡&öæ÷W6Ç’’Â6ğ¢òòòF†—2öæÇ’&÷VæG2†÷rÆFRâWw&FRÖ’7F–ÆÂ'&—fRâ¶VW—B$õdRF†R&6¶VæBw2÷vâÄÄÒF–ÖV÷W@¢òòò„$%E5ô•õD”ÔTõUBÂFVfVÇB32’6òF†R&6¶VæBw2FV×ÆFRfÆÆ&6²&VG2F†—2FVFÆ–æRãÂ÷7VÖÖ'“à¢V&Æ–2–çB•F–ÖV÷WE6V6öæG2²vWC²6WC²ÒÒ3S° ¢òòòÇ7VÖÖ'“äVæGö–çBF†R6W'fW"õ5G2WFöÖF–27&6‚&W÷'G2Fò(	BF†R&W÷'D†÷7B'Vr×&W÷'B–æ&÷‚Â6†&V@¢òòòv—F‚Æ–W"fVVF&6²²6Æ–VçB7&6†W2‡6W'fW"&W÷'G2&R6†VBFòF†R6ÖR6öçG&7B’âWÆöF–ær7F—0¢òòòôdbVçF–ÂÇ6VR7&VcÒ$7&6…&W÷'D”¶W’"óâ—2Ç6ò6WBÂ6ò6VÆbÖ†÷7FVB6W'fW"æWfW"†öæW2†öÖRVæÆW70¢òòò—G2÷W&F÷"÷G2–ã²&W÷'G2&Rw&—GFVâFòF†RÆö6ÂÆ3æ7&6‡&W÷'G2óÂö3âföÆFW"&Vv&FÆW72ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær7&6…&W÷'DVæGö–çB²vWC²6WC²ÒÒ&‡GG3¢ò÷&W÷'G2æ&Æö6·6&W–öæGF†W7F'2æFRö’ö'Vw&W÷'B#° ¢òòòÇ7VÖÖ'“å7ÒÖvFR¶W’6VçBv—F‚âWFöÖF–27&6‚&W÷'B‡F†RÆ3ç‚Ö'Vw&W÷'BÖ¶W“Âö3â†VFW"’âV×G¢òòò‡F†RFVfVÇB’ÆVfW27&6‚WÆöF–ærF—6&ÆVB&Vv&FÆW72öbF†RVæGö–çB(	Böff–6–Â'V–ÆG2–æ¦V7B—BãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær7&6…&W÷'D”¶W’²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“ä÷W&F÷"W6‚Öæ÷F–f–6F–öâU$ÂƒÆ3ä$%5ôäõD”e•õU$ÃÂö3âÂ—77VR3“3‚’(	BâçFg’F÷–2U$Â÷ ¢òòòç’vV&†öö²F†B66WG2Æ–â×FW‡Bõ5Bâ–ævVBöâÆ3â÷&W÷'G–çCÂö3âóÆ3â÷&W÷'G6†SÂö3âæBöà¢òòòvF6‚ÖÆ—7BæÖRfÆw2âV×G’‡F†RFVfVÇB’Òöfc²F†R†÷7FVBfÆVWBÆVfW2F†—2Vç6WB&V6W6RF†P¢òòòv÷&ÆD†÷7Bõ&W÷'D†÷7B6''’F†V—"÷vâæ÷F–g’†öö·2F†W&RãÂ÷7VÖÖ'“à¢V&Æ–27G&–æræ÷F–g•W&Â²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“äæÖR&Æö6²Æ—7BVæf÷&6VBB¦ö–â‡6†&VB6VÖçF–72v—F‚F†Rv÷&ÆD†÷7BvFW2(	B6VP¢òòòÇ6VR7&VcÒ$ÖöFW&F–öâäæÖU67&VVâ"óâ’âÆ3ä$%5ô$Äô4´TEõtõ$E3Âö3â†6öÖÖ×6W&FVB’U…DTäE2F†P¢òòòFVfVÇG3²7V'7G&–ærÖÖF6†VBÂ6òçVÖ&W"6öFW2÷"6†÷'B&'&Wf–F–öç2æWfW"&VÆöær†W&RãÂ÷7VÖÖ'“à¢V&Æ–2Æ—7CÇ7G&–æsâ&Æö6¶VDæÖUv÷&G2²vWC²6WC²ÒÒæWr„ÖöFW&F–öâäæÖU67&VVâäFVfVÇD&Æö6¶VEv÷&G2“° ¢òòòÇ7VÖÖ'“äæÖRvF6‚Æ—7C¢¦ö–âVæFW"ÖF6†–æræÖR—2ÄÄõtTB'WBÆövvVB²W6†VBFğ¢òòòÇ6VR7&VcÒ$æ÷F–g•W&Â"óâ(	BF†R‡VÖâFV6–FW2Âæ÷BF†Rf–ÇFW"†—77VR3“3‚’âÆ3ä$%5õtD4…õtõ$E3Âö3à¢òòò†6öÖÖ×6W&FVB’U…DTäE2F†RFVfVÇG3²ÆVF–ærsÒr–ç2âVçG'’Fòv†öÆR×Fö¶VâÖF6†–ærãÂ÷7VÖÖ'“à¢V&Æ–2Æ—7CÇ7G&–æsâvF6„æÖUv÷&G2²vWC²6WC²ÒÒæWr„ÖöFW&F–öâäæÖU67&VVâäFVfVÇEvF6…v÷&G2“° ¢òòòÇ7VÖÖ'“ä÷BÖ–âÆ—fRfö–6R6†Bâv†VâfÇ6R‡F†RFVfVÇBöâFVF–6FVB6W'fW'2’F†R6W'fW"&V¦V7G2ö–væ÷&W0¢òòòfö–6Rg&ÖW2æBFVÆÇ26Æ–VçG2fö–6R—2Væf–Æ&ÆS²FW‡B6†B—2VæffV7FVBâfö–6R—2&VÆ–VBÆ—fRæ@¢òòòæWfW"&V6÷&FVBâF†R'VæFÆVB6–ævÆWÆ–W"ö†÷7BÆVæ6†W"Ö’GW&âF†—2öâf÷"Æö6Â6òÖ÷ãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂfö–6T6†DVæ&ÆVB²vWC²6WC²Ğ ¢òòÒÒÒ†÷7FVB×v÷&ÆG2fÆVWB7W÷'B†÷W&F÷"×6WBÂæWfW"Æ–W"Öf6–ær’â6öçG&öÂÆæRF†B7vç2öæP¢òò6W'fW"6öçF–æW"W"v÷&ÆBW6W2F†W6RFòÖ¶R–ç7Fæ6W27F÷v†VâVçW6VBÂvFR¦ö–ç2FòÆ–W'2—@¢òòf÷V6†VBf÷"ÂæB†æBF†RWÆöF–ær÷væW"F†V—"v÷&ÆB&6²âÆÂF‡&VRFVfVÇBôdbÂ6ò6–ævÆWÆ–W"À¢òòÄâ†÷7F–æræB6Æ76–26VÆbÖ†÷7F–ær&V†fRW†7FÇ’2&Vf÷&RâÒÒĞ ¢òòòÇ7VÖÖ'“å6‡WBF†R6W'fW"F÷vâ6ÆVæÇ’†G&–â²6fRÂÆ–¶R7G&Â´2’gFW"F†—2Öç’Ö–çWFW2v—F‚æğ¢òòò¦ö–æVBÆ–W"(	B6÷VçFVBg&öÒ7F'GWFöòÂ6òvö¶Vâ–ç7Fæ6Ræö&öG’¦ö–ç2Ç6ò7F÷2â†FVfVÇB¢òòòÒæWfW#²6öçF–æW"'Vææ–ærF†—2×W7BäõBW6RâWFò×&W7F'BöÆ–7’÷"—BFVfVG2F†R–FÆR7F÷ãÂ÷7VÖÖ'“à¢V&Æ–2–çB–FÆU6‡WFF÷väÖ–çWFW2²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“åv†Vâ6WBÂWfW'’æWGv÷&²¦ö–â×W7B6''’fÆ–B„Ô2¦ö–âFö¶Vâ—77VVBf÷"F†—2v÷&ÆB'’F†P¢òòò6öçG&öÂÆæR‡6VRÆ3ä†÷7FVD¦ö–åFö¶VãÂö3â’âV×G’†FVfVÇB’Ò¦ö–ç2v÷&²2&Vf÷&RâÆö6Â÷6–ævÆWÆ–W ¢òòò6W76–öç2&RW†V×B(	BF†R'VæFÆVB†÷7BæWfW"6WG2F†—2ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær¦ö–åFö¶Vå6V7&WB²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“ä66÷VçB–BöbF†Rv÷&ÆBw2÷væW"–âF†R6öçG&öÂÆæRâFö¶Vâ×fW&–f–VB¦ö–âv†÷6R66÷VçB–@¢òòòÖF6†W2—2w&çFVBv÷&ÆDFÖ–â&Vv&FÆW72öbF†R&f—'7B¦ö–æW"&V6öÖW2v÷&ÆDFÖ–â"'VÆR(	B&WV—&VBf÷ ¢òòòWÆöFVB6fW2Âv†W&R6öÖVöæRVÇ6RÖ’Ç&VG’†öÆBF†B&öÆRâV×G’†FVfVÇB’Òæò÷væW"Ö–ærãÂ÷7VÖÖ'“à¢V&Æ–27G&–ærv÷&ÆD÷væW$66÷VçD–B²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“å6†&VB6V7&WBF†R6öçG&öÂÆæR×W7B&W6VçB…‚Ôææ÷Væ6RÕFö¶Vâ†VFW"’FòW6‚Ö–çFVææ6P¢òòòææ÷Væ6VÖVçBf–F†RvV%6ö6¶WBvFWv’w2Æ3åõ5Böææ÷Væ6SÂö3ââV×G’†FVfVÇB’ÒVæGö–çBF—6&ÆVC°¢òòòF†R'VæFÆVB÷6VÆbÖ†÷7FVB6W'fW"æWfW"6WG2F†—2†FÖ–ç2W6RF†R–âÖvÖRöææ÷Væ6R6öÖÖæG2–ç7FVB’ãÂ÷7VÖÖ'“à¢V&Æ–27G&–ærææ÷Væ6UFö¶Vâ²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòÒÒÒf–ÆW7—7FVÒÆö6F–öç2‡&W6öÇfVB&VÆF—fRFòF†R6W'fW"–ç7FÆÂF—"’ÒÒĞ ¢V&Æ–27G&–ær6fW5&ö÷B²vWC²6WC²ÒÒ'6fW2#°¢V&Æ–27G&–ærFFF—"²vWC²6WC²ÒÒ&FF#° ¢òòòÇ7VÖÖ'“à¢òòòW'6—7FVæ6R&6¶VæBf÷"WF†÷&—FF—fRv÷&ÆB7FFRâ'7Æ—FR"—2F†R÷'F&ÆRFVfVÇC²'÷7Fw&W7Â ¢òòòW6W2Ç6VR7&VcÒ%÷7Fw&W46öææV7F–öå7G&–ær"óâæB—2–çFVæFVBf÷"†÷7FVBFVF–6FVBôÔÔò×7G–ÆR6W'fW'2à¢òòòÂ÷7VÖÖ'“à¢V&Æ–27G&–ærFF&6U&÷f–FW"²vWC²6WC²ÒÒ'7Æ—FR#° ¢òòòÇ7VÖÖ'“å÷7Fw&U5Â6öææV7F–öâ7G&–ærâ&VfW"7WÇ––ærF†—2F‡&÷Vv‚$%5õõ5Du$U5ô4ôääT5D”ôåõ5E$”äp¢òòò÷"DD$4UõU$Â–â†÷7FVBFWÆ÷–ÖVçG2–ç7FVBöb6öÖÖ—GF–ær—BFò6W'fW"æ§6öâãÂ÷7VÖÖ'“à¢V&Æ–27G&–ær÷7Fw&W46öææV7F–öå7G&–ær²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“ä÷F–öæÂw&—F&ÆRföÆFW"†öÆF–ær–âÖvÖRÖVF—F÷"7G'V7GW&RFV×ÆFW0¢òòòƒÆ3ç7FF–öå÷FV×ÆFW2ò¢æ§6öãÂö3âÂÆ3ç6WGFÆVÖVçE÷FV×ÆFW2ò¢æ§6öãÂö3â’âv†Vâ6WBÂF†W’&RÖW&vV@¢òòò–çFòF†RFV×ÆFRööÇ2BÆöB6òÆ–W"ÖWF†÷&VB7G'V7GW&W2V"–âæWrv÷&ÆG2v—F†÷WB¢òòò&V'V–ÆBâV×G’(y"öæÇ’F†R6†—VBÆ3æFFóÂö3âööÇ2&RW6VBãÂ÷7VÖÖ'“à¢V&Æ–27G&–ærW6W$6öçFVçDF—"²vWC²6WC²ÒÒ7G&–æräV×G“° ¢òòòÇ7VÖÖ'“åv†WF†W"Fò7F×F†RVçFW&&ÆR7F'FW"×6†—‡VÆÂBF†R7F'BÆæF–ær¦öæR„Ó#6’ãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6U7F'FW%6†—²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×&ö6VGW&Â6WGFÆVÖVçBöâF†R7F'BÆæWBw27W&f6R†v¢òòòg&öÒF†RÆæF–ær¦öæR’v†VâF†RÆæWB²6VVB6ÆÂf÷"öæRà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6U6WGFÆVÖVçG2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×&&R7&6†VB×6†—w&V6²öâF†R7F'BÆæWBw27W&f6R†v¢òòòg&öÒF†RÆæF–ær¦öæR’âw&V6·2&RVæ6öÖÖöâæBÆVgB66fVævV&ÆR†æ÷B&÷FV7FVB’à¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6Uw&V6·2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×'W&–VBfVÇB'V–ç2‚%vVÇFVâ&V–6†W""rÕ#2’(	B(	3"W"v÷&ÆC¢7W&f6P¢òòò–ÆÆ"&–ær÷fW"6†gBF÷vâFò7FöæR6†Ö&W"v—F‚FF66†W2²Æö÷F&ÆR6öçF–æW'2à¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6UfVÇG2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’66GFW"&FF7V&W2"öâ&öG’w27W&f6R(	B(	4âW"v÷&ÆB‡6öÖR&öF–W2vW@¢òòòæöæR“¢vÆ÷v–ærF÷væÆöBFW&Ö–æÇ2F†Bw&çBF†RÆ–W"6ÖÆÂ'VæFÆVBÖ–æ–vÖRf÷"F†V—"W'6öæÀ¢òòò&6FR6öÆÆV7F–öââFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVC²6''’æòvÖWÆ’VffV7Bà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6TFF7V&W2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×&ö6VGW&ÂÆ#æf7F÷&–W3Âö#âöâ&öG’w27W&f6R(	B&&R–æGW7G&–Â'V–ÆF–æw0¢òòòƒ(	4âW"v÷&ÆBÂÖ÷7BvWBæöæR’†÷W6–æræ–ÖFVBÖ6†–æW2æB&öGV7F–öâFW&Ö–æÂâ&÷FV7FVBÆ–¶R¢òòò6WGFÆVÖVçBVçF–Â6Æ–ÖVBv—F‚â66W726öFRâFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVBà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6Tf7F÷&–W2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×&æFöÖ—6VBÆ#ç'V–ç3Âö#âöbfÆÆVâ6WGFÆVÖVçG2öâ&öG’w27W&f6R(	B'F–À¢òòòvÆÇ2Â†ÆbÖ6öÆÆ6VBF÷vW"Â'V&&ÆRâVæÆ–¶R–çF7B6WGFÆVÖVçG2Â'V–ç2&RäõB&÷FV7FVB‡F†V—"&Æö6·0¢òòò&Rg&VVÇ’Ö–æV&ÆR’âFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVBà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6U'V–ç2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’66GFW"7FæFÆöæRÆ#çG&V7W&R6†W7G3Âö#âöâ&öG’w27W&f6R(	B&&RÆö÷F&ÆP¢òòò66†W2–æFWVæFVçBöbç’7G'V7GW&Rƒ(	4âW"v÷&ÆBÂÖ÷7BvWBæöæR’âÆö÷FVBöæ6RÂF†VâvöæRà¢òòòFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVBà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6T6†W7G2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×Æ#æ&æF—B6×3Âö#âöâ&öG’w27W&f6R(	B6ÖÆÂ†÷7F–ÆR÷WG÷7G0¢òòò†‡WG2²Æ—6FR’wV&FVB'’&æF—Bå72Âv—F‚Æö÷B7F6‚2F†R&–B&Wv&BâÆ–¶R'V–ç2F†P¢òòò&Æö6·2&RäõB&÷FV7FVC²&¦VB6×7F—2&¦VBæB6ÆV&VB&æF—G27F’vöæRâ6×2Ç6ğ¢òòò&WV—&RÇ6VR7&VcÒ$vÖU'VÆW2ä&æF—G2"óâFò&RVæ&ÆVBâFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVBà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6T&æF—D6×2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòòv†WF†W"F†R6W'fW"Ö’7F×Æ#æÖöçVÖVçG3Âö#âöâ&öG’w27W&f6R(	BW&öFVB&VÆ–72öbfæ—6†V@¢òòò6—f–Æ—6F–öâ†&6FR&6†W2Âg&VR×7FæF–ærvFRÂ7FöæR6—&6ÆRÂâö&VÆ—6²Â'VæRÇF"’Â6'fV@¢òòòv—F‚vÆ÷v–ær'VæW2F†Bw&çB¶æ÷vÆVFvRö–çG2v†Vâ66ææVBâÆ–¶R'V–ç2F†R&Æö6·2&RäõB&÷FV7FVBÀ¢òòò6ò&¦VBÖöçVÖVçB7F—2&¦VBâVæÆ–¶RWfW'’÷F†W"7W&f6RfVGW&RF†W6RÇ6òV"öâ—&ÆW70¢òòò&öF–W2âFWFW&Ö–æ—7F–2g&öÒF†Rv÷&ÆB6VVBà¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂÆ6TÖöçVÖVçG2²vWC²6WC²ÒÒG'VS° ¢òòòÇ7VÖÖ'“à¢òòò6–ævÆWÆ–W"öFÖ–â6öçfVæ–Væ6S¢wV&çFVRöæRFF7V&R&–v‡BæW‡BFòF†R7F'Bv÷&ÆBw2ÆæF–ærBÂ6ğ¢òòò6öÆòÆ–W"6âÇv—2&V6‚Ö–æ–vÖRæV"7vââ6WBöæÇ’'’F†R'VæFÆVB6–ævÆWÆ–W"ÆVæ6†W#°¢òòòÆVgBöfböâ6†&VBöFVF–6FVB6W'fW'2‡v†W&RF†R&æFöÒ66GFW"Æ–W22æ÷&ÖÂ’à¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂwV&çFVU7F'DFF7V&R²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“à¢òòò6–ævÆWÆ–W"7F÷'’öæ&ö&F–æs¢wV&çFVRF†R7F—fR6²w2f—'7B7F–ÆÂ×Vç&VBg&vÖVçB6†÷'BvÆ°¢òòòg&öÒF†R7F'BÆæF–ærBâ6WBöæÇ’'’F†R'VæFÆVB6–ævÆWÆ–W"ö†÷7BÆVæ6†W#²FVF–6FVB6W'fW'2¶VW ¢òòòF†Ræ÷&ÖÂ&&RÂv÷&ÆB×6VVFVBg&vÖVçB66GFW"à¢òòòÂ÷7VÖÖ'“à¢V&Æ–2&ööÂwV&çFVU7F'E7F÷'”g&vÖVçB²vWC²6WC²Ğ ¢òòÒÒÒ6–ævÆWÆ–W"$7&VF—fR"v÷&ÆB÷F–öç2‡F†RÆ–W"–6·2F†W6RBv÷&ÆB7&VF–öâ’âF†W’&R¢òò†VB×7F'B6æF&÷ƒ¢WfW'—F†–ærf–Æ&ÆR²7F'FW"6WBÂv†–ÆR7W'f—fÂÖV6†æ–727F’ôââFVfVÇ@¢òòfÇ6RÒF†Ræ÷&ÖÂ$W‡Æ÷&W""W‡W&–Væ6RâW'6—7FVBW"v÷&ÆB–âv÷&ÆDÖWFFF6òF†W’&VÇ’öâÆöBâÒÒĞ ¢òòòÇ7VÖÖ'“å7F'Bv—F‚WfW'’&ÇVW&–çBVæÆö6¶VB‡&RÖÆ–VBV6‚¦ö–ã²–FV×÷FVçB’ãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂ7&VF—fUVæÆö6´ÆÄ&ÇVW&–çG2²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“ä÷vâWfW'’6†—G—Rg&öÒF†R7F'B‡&RÖÆ–VBV6‚¦ö–ã²–FV×÷FVçB’ãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂ7&VF—fU7F'DÆÅ6†—2²vWC²6WC²Ğ ¢òòòÇ7VÖÖ'“äw&çB7W&FVB¶—B†ÆÂFööÇ2²vVæW&÷W27F6·2öb¶W’ÖFW&–Ç2’öæ6RÂBf—'7B7vâãÂ÷7VÖÖ'“à¢V&Æ–2&ööÂ7&VF—fU7F'FW$¶—B²vWC²6WC²Ğ ¢&—fFR7FF–2&VFöæÇ’§6öå6W&–Æ—¦W$÷F–öç2÷F–öç2ÒæWr‚¢°¢w&—FT–æFVçFVBÒG'VRÀ¢&÷W'G”æÖT66T–ç6Vç6—F—fRÒG'VRÀ¢6öçfW'FW'2Ò²æWr§6öå7G&–ætVçVÔ6öçfW'FW"‚’ÒÀ¢Ó° ¢òòòÇ7VÖÖ'“à¢òòò&W6öÇfW2F†R7F'GW6öæf–râæ÷&ÖÆÇ’F†—2—2Ç6VR7&VcÒ$ÆöB"óâ‡v†–6‚&VG2(	BæBöâf—'7B'Và¢òòòWFòÖ7&VFW2(	BÆ3æ6öæf–r÷6W'fW"æ§6öãÂö3âæW‡BFòF†RW†RÂF†RFö7VÖVçFVBFVF–6FVB×6W'fW"fÆ÷r’à¢òòòv†VâÆ3âÒÖæòÖ6öæf–sÂö3â—2&W6VçB—B&WGW&ç2W&R–âÖÖVÖ÷'’FVfVÇG2–ç7FVBæBF÷V6†W2æòf–ÆRà¢òòğ¢òòòF†R'VæFÆVB6–ævÆWÆ–W"†÷7B76W2Æ3âÒÖæòÖ6öæf–sÍüÛÛh‘éì¶»§q«^tµ•Ñ…‘…Ñ„¤€´´´(€€€€€€€€€€€€€€€…Í”€‰É•…ÑÕÉ•Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È„¤¤ìIÕ±•Ì¹É•…ÑÕÉ•‰Õ¹‘…¹”€ô„ì…ÁÁ±¥•¹‘ ‰É•…ÑÕÉ•Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Á±…¹•Ğµ•¹•µ¥•Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÁ”¤¤ìIÕ±•Ì¹A±…¹•Ñ¹•µ¥•Ì€ôÁ”ì…ÁÁ±¥•¹‘ ‰Á±…¹•Ğµ•¹•µ¥•Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Õ™½Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÕ˜¤¤ìIÕ±•Ì¹±¥•¹U™½Ì€ôÕ˜ì…ÁÁ±¥•¹‘ ‰Õ™½Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰‰…¹‘¥ÑÌˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È‰„¤¤ìIÕ±•Ì¹	…¹‘¥ÑÌ€ô‰„ì…ÁÁ±¥•¹‘ ‰‰…¹‘¥ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰½áå•¸ˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ=áå•¹½¹ÍÕµÁÑ¥½¸ø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È½à¤¤ìIÕ±•Ì¹=áå•¹½¹ÍÕµÁÑ¥½¸€ô½àì…ÁÁ±¥•¹‘ ‰½áå•¸ˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰¡Õ¹•Èˆè(€€€€€€€€€€€€€€€€€€€€¼¼•ÁĞÑ¡”¹•Ü‘¥™™¥Õ±ÑäÑ¥•È€¡=™˜½M±½Ü½9½Éµ…°½…ÍĞ¤…¹°™½È‰…­İ…É½µÁ…Ñ¥‰¥±¥Ñäİ¥Ñ (€€€€€€€€€€€€€€€€€€€€¼¼•á¥ÍÑ¥¹œ½¹™¥Ì½Í…Ù•Ì°Ñ¡”±•…ä‰½½±•…¸€¡ÑÉÕ”ƒŠH9½Éµ…°°™…±Í”ƒŠH=™˜¤¸(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ!Õ¹•É½¹ÍÕµÁÑ¥½¸ø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È¡œ¤¤ìIÕ±•Ì¹!Õ¹•É½¹ÍÕµÁÑ¥½¸€ô¡œì…ÁÁ±¥•¹‘ ‰¡Õ¹•Èˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…È¡ˆ¤¤ìIÕ±•Ì¹!Õ¹•É½¹ÍÕµÁÑ¥½¸€ô¡ˆ€ü!Õ¹•É½¹ÍÕµÁÑ¥½¸¹9½Éµ…°€è!Õ¹•É½¹ÍÕµÁÑ¥½¸¹=™˜ì…ÁÁ±¥•¹‘ ‰¡Õ¹•Èˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰¡…é…É‘Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ!…é…É‘1•Ù•°ø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È¡è¤¤ìIÕ±•Ì¹¹Ù¥É½¹µ•¹Ñ…±!…é…É‘Ì€ô¡èì…ÁÁ±¥•¹‘ ‰¡…é…É‘Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰‘•…Ñ µÁ•¹…±Ñäˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ•…Ñ¡A•¹…±Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È‘À¤¤ìIÕ±•Ì¹•…Ñ¡A•¹…±Ñä€ô‘Àì…ÁÁ±¥•¹‘ ‰‘•…Ñ µÁ•¹…±Ñäˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰­••Àµ¥¹Ù•¹Ñ½Éäˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…È­¤¤¤ìIÕ±•Ì¹-••Á%¹Ù•¹Ñ½Éå=¹•…Ñ €ô­¤ì…ÁÁ±¥•¹‘ ‰­••Àµ¥¹Ù•¹Ñ½Éäˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰­••ÀµÍ¡¥Àˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…È­Ì¤¤ìIÕ±•Ì¹-••ÁM¡¥Á=¹•…Ñ €ô­Ìì…ÁÁ±¥•¹‘ ‰­••ÀµÍ¡¥Àˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰…ÕÑ¼µ…¥´ˆè(€€€€€€€€€€€€€€€€€€€€¼¼€ŒØäÌèµ…¹Õ…°…¥µ¥¹œƒŠPİ•…Á½¹Ì½¹±ä¡¥Ğİ¡…Ğ¥ÌÕ¹‘•ÈÑ¡”É½ÍÍ¡…¥Èİ¡•¸½™˜¸(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…È…„¤¤ìIÕ±•Ì¹ÕÑ½¥´€ô…„ì…ÁÁ±¥•¹‘ ‰…ÕÑ¼µ…¥´ˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍÑ½Éäˆè(€€€€€€€€€€€€€€€€€€€IÕ±•Ì¹MÑ½Éå%€ôÙ…±Õ”ì…ÁÁ±¥•¹‘ ‰ÍÑ½Éäˆ¤ì€¼¼Á…¬¥°€‰¹½¹”ˆ™½ÈÍ…¹‘‰½à°½È€‰‘•™…Õ±Ğˆ½•µÁÑä(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍÑ½Éäµ‘•¹Í¥Ñäˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñMÑ½Éå•¹Í¥Ñäø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍÑ½Éå•¹Ì¤¤ìIÕ±•Ì¹MÑ½Éå•¹Í¥Ñä€ôÍÑ½Éå•¹Ìì…ÁÁ±¥•¹‘ ‰ÍÑ½Éäµ‘•¹Í¥Ñäˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰™±½É„ˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È™°¤¤ì]½É±¹±½É…•¹Í¥Ñä€ô™°ì…ÁÁ±¥•¹‘ ‰™±½É„ˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰½É”ˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È½È¤¤ì]½É±¹I…É•I•Í½ÕÉ•Ì€ô½Èì…ÁÁ±¥•¹‘ ‰½É”ˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Í•ÑÑ±•µ•¹ÑÌˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍ”¤¤ì]½É±¹M•ÑÑ±•µ•¹ÑÌ€ôÍ”ì…ÁÁ±¥•¹‘ ‰Í•ÑÑ±•µ•¹ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Á±…¹•ĞµİÉ•­Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÁÜ¤¤ì]½É±¹A±…¹•Ñ]É•­Ì€ôÁÜì…ÁÁ±¥•¹‘ ‰Á±…¹•ĞµİÉ•­Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Ù…Õ±ÑÌˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÙ„¤¤ì]½É±¹Y…Õ±ÑÌ€ôÙ„ì…ÁÁ±¥•¹‘ ‰Ù…Õ±ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍÑ…Ñ¥½¹Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍ˜¤¤ì]½É±¹MÁ…•MÑ…Ñ¥½¹Ì€ôÍ˜ì…ÁÁ±¥•¹‘ ‰ÍÑ…Ñ¥½¹Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰•á½Ñ¥Œˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È•à¤¤ì]½É±¹á½Ñ¥]½É±‘Ì€ô•àì…ÁÁ±¥•¹‘ ‰•á½Ñ¥Œˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍÑ…Ñ¥½¸µÑ•µÁ±…Ñ•Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍĞ¤¤ì]½É±¹MÑ…Ñ¥½¹Q•µÁ±…Ñ•UÍ”€ôÍĞì…ÁÁ±¥•¹‘ ‰ÍÑ…Ñ¥½¸µÑ•µÁ±…Ñ•Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Í•ÑÑ±•µ•¹ĞµÑ•µÁ±…Ñ•Ìˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍ•Ğ¤¤ì]½É±¹M•ÑÑ±•µ•¹ÑQ•µÁ±…Ñ•UÍ”€ôÍ•Ğì…ÁÁ±¥•¹‘ ‰Í•ÑÑ±•µ•¹ĞµÑ•µÁ±…Ñ•Ìˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍÑÉÕÑÕÉ”µÁ…­Ìˆè(€€€€€€€€€€€€€€€€€€€€¼¼Q¡”•¹…‰±•ÍÑÉÕÑÕÉ”µÑ•µÁ±…Ñ”Á…­Ì€ ‰„±ˆˆ¤ì•µÁÑä…ÉœƒŠH…±°Á…­Ì€¡Ñ¡”‘•™…Õ±Ğ¤¸(€€€€€€€€€€€€€€€€€€€€¼¼Q¡”€‰}}¹½¹•}|ˆÍ•¹Ñ¥¹•°µ•…¹Ì€‰¹¼Á…­Ìˆ€¡Ñ¡”Á¥­•ÈÑÕÉ¹••Ù•ÉåÑ¡¥¹œ½™˜¤°İ¡¥ İ”(€€€€€€€€€€€€€€€€€€€€¼¼­••À…Ì„Í¥¹±”¹½¸µµ…Ñ¡¥¹œ•¹ÑÉäÍ¼¹¼Ñ•µÁ±…Ñ”¥Ì•Ù•ÈÉ½±±•¸(€€€€€€€€€€€€€€€€€€€Ù…ÈÁ…­1¥ÍĞ€ô¹•ÜMåÍÑ•´¹½±±•Ñ¥½¹Ì¹•¹•É¥Œ¹1¥ÍĞñÍÑÉ¥¹œø ¤ì(€€€€€€€€€€€€€€€€€€€™½É•… €¡Ù…ÈÀ¥¸Ù…±Õ”¹MÁ±¥Ğ œ°œ°MÑÉ¥¹MÁ±¥Ñ=ÁÑ¥½¹Ì¹I•µ½Ù•µÁÑå¹ÑÉ¥•Ì¤¤(€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€Ù…ÈÑÉ¥µµ•€ôÀ¹QÉ¥´ ¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜€¡ÑÉ¥µµ•¹1•¹Ñ €ø€À¤(€€€€€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€Á…­1¥ÍĞ¹‘¡ÑÉ¥µµ•¤ì(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€€€€€]½É±¹¹…‰±•‘MÑÉÕÑÕÉ•A…­Ì€ôÁ…­1¥ÍĞì(€€€€€€€€€€€€€€€€€€€…ÁÁ±¥•¹‘ ‰ÍÑÉÕÑÕÉ”µÁ…­Ìˆ¤ì(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰ÍåÍÑ•µÌˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…ÈÍä¤¤ì]½É±¹MÑ…ÉMåÍÑ•µ½Õ¹Ğ€ô5…Ñ ¹±…µÀ¡Íä°€Ä°€ÌÈ¤ì…ÁÁ±¥•¹‘ ‰ÍåÍÑ•µÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Á±…¹•ÑÌµµ¥¸ˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…ÈÁµ¥¸¤¤(€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5¥¸€ô5…Ñ ¹±…µÀ¡Áµ¥¸°€Ä°€ÄÀ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€¼¼-••Àµ¥¸ƒŠ&µ…à¹¼µ…ÑÑ•ÈÑ¡”…Éœ½É‘•Èè•Ñ•Éµ¥¹¥ÍÑ¥I…¹‘½´¹I…¹”Í¥±•¹Ñ±ä(€€€€€€€€€€€€€€€€€€€€€€€€¼¼É•ÑÕÉ¹Ìµ¥¸İ¡•¸µ…à€ğµ¥¸°İ¡¥ İ½Õ±‰åÁ…ÍÌÑ¡”µ…à±…µÀ•¹Ñ¥É•±ä¸(€€€€€€€€€€€€€€€€€€€€€€€]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5…à€ô5…Ñ ¹5…à¡]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5…à°]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5¥¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€…ÁÁ±¥•¹‘ ‰Á±…¹•ÑÌµµ¥¸ˆ¤ì(€€€€€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Á±…¹•ÑÌµµ…àˆè(€€€€€€€€€€€€€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…ÈÁµ…à¤¤(€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5…à€ô5…Ñ ¹±…µÀ¡Áµ…à°€Ä°€ÄÈ¤ì(€€€€€€€€€€€€€€€€€€€€€€€]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5¥¸€ô5…Ñ ¹5¥¸¡]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5¥¸°]½É±¹A±…¹•ÑÍA•ÉMåÍÑ•µ5…à¤ì(€€€€€€€€€€€€€€€€€€€€€€€…ÁÁ±¥•¹‘ ‰Á±…¹•ÑÌµµ…àˆ¤ì(€€€€€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰µ½½¹Ìµµ…àˆè(€€€€€€€€€€€€€€€€€€€€¼¼…ÀÉ…¥Í•€ÔƒŠH€à€ ŒÔĞØ¤èÑ¡”1½¹”¥…¹Ğ…É¡•ÑåÁ”…ÉÉ¥•ÌÕÀÑ¼€àµ½½¹Ì°Í¼Ñ¡”(€€€€€€€€€€€€€€€€€€€€¼¼•áÁ±¥¥ĞÍ±¥‘•Èµ…äÉ•… Ñ¡”Í…µ”•¥±¥¹œ¸(€€€€€€€€€€€€€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…Èµ´¤¤ì]½É±¹5½½¹ÍA•ÉA±…¹•Ñ5…à€ô5…Ñ ¹±…µÀ¡µ´°€À°€à¤ì…ÁÁ±¥•¹‘ ‰µ½½¹Ìµµ…àˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Ù…É¥…¹”ˆè(€€€€€€€€€€€€€€€€€€€€¼¼MåÍÑ•´…É¡•ÑåÁ”Ù…É¥…¹”€ ŒÔĞØ¤¸=¸™½È•Ù•Éä¹•Üİ½É±‰ä‘•™…Õ±Ğì€‰½™˜ˆ¥ÌÑ¡”(€€€€€€€€€€€€€€€€€€€€¼¼•Í…Á”¡…Ñ ™½ÈÑ•ÍÑÌ½…ÁÑÕÉ•ÌÑ¡…Ğ¹••Ñ¡”±…ÍÍ¥ŒÕ¹¥™½É´±…å½ÕĞ¸(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…ÈÍØ¤¤ì]½É±¹MåÍÑ•µY…É¥…¹”€ôÍØì…ÁÁ±¥•¹‘ ‰Ù…É¥…¹”ˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½¸ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹MåÍÑ•µY…É¥…¹”€ôÑÉÕ”ì…ÁÁ±¥•¹‘ ‰Ù…É¥…¹”ˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½™˜ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹MåÍÑ•µY…É¥…¹”€ô™…±Í”ì…ÁÁ±¥•¹‘ ‰Ù…É¥…¹”ˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰‰•±ÑÌˆè(€€€€€€€€€€€€€€€€€€€€¼¼ÍÑ•É½¥µ‰•±Ğ±…å½ÕĞ€ ŒØàÌ¤¸=¸™½È•Ù•Éä¹•Üİ½É±‰ä‘•™…Õ±Ğì€‰½™˜ˆÉ•ÍÑ½É•ÌÑ¡”(€€€€€€€€€€€€€€€€€€€€¼¼±…ÍÍ¥ŒÍ…ÑÑ•É•µ…ÍÑ•É½¥‘¥ÍŒ€¡Í…µ”•Í…Á”µ¡…Ñ É½±”…Ì€‰Ù…É¥…¹”ˆ¤¸(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…È…ˆ¤¤ì]½É±¹ÍÑ•É½¥‘	•±ÑÌ€ô…ˆì…ÁÁ±¥•¹‘ ‰‰•±ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½¸ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹ÍÑ•É½¥‘	•±ÑÌ€ôÑÉÕ”ì…ÁÁ±¥•¹‘ ‰‰•±ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½™˜ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹ÍÑ•É½¥‘	•±ÑÌ€ô™…±Í”ì…ÁÁ±¥•¹‘ ‰‰•±ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰½¹Ñ¥¹•¹ÑÌˆè(€€€€€€€€€€€€€€€€€€€€¼¼½¹Ñ¥¹•¹ÑÌ€˜É•…°½•…¹Ì€ ŒÜÀĞ¤¸=¸™½È•Ù•Éä¹•Üİ½É±‰ä‘•™…Õ±Ğì€‰½™˜ˆÉ•ÍÑ½É•Ì(€€€€€€€€€€€€€€€€€€€€¼¼Ñ¡”±…ÍÍ¥Œ¹½¥Í”µ½…ÍĞÑ•ÉÉ…¥¸€¡Í…µ”•Í…Á”µ¡…Ñ É½±”…Ì€‰Ù…É¥…¹”ˆ¼‰‰•±ÑÌˆ¤¸(€€€€€€€€€€€€€€€€€€€¥˜€¡‰½½°¹QÉåA…ÉÍ”¡Ù…±Õ”°½ÕĞÙ…ÈÑŒ¤¤ì]½É±¹Q•ÉÉ…¥¹½¹Ñ¥¹•¹ÑÌ€ôÑŒì…ÁÁ±¥•¹‘ ‰½¹Ñ¥¹•¹ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½¸ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹Q•ÉÉ…¥¹½¹Ñ¥¹•¹ÑÌ€ôÑÉÕ”ì…ÁÁ±¥•¹‘ ‰½¹Ñ¥¹•¹ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€•±Í”¥˜€¡ÍÑÉ¥¹œ¹ÅÕ…±Ì¡Ù…±Õ”°€‰½™˜ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…±%¹½É•…Í”¤¤ì]½É±¹Q•ÉÉ…¥¹½¹Ñ¥¹•¹ÑÌ€ô™…±Í”ì…ÁÁ±¥•¹‘ ‰½¹Ñ¥¹•¹ÑÌˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰‘…¹•Èˆè(€€€€€€€€€€€€€€€€€€€€¼¼±½‰…°¡½ÍÑ¥±¥ÑäµÕ±Ñ¥Á±¥•È€ ŒÔĞÜ¤ƒŠPÍ…±•ÌÍÁ…”µ…µ‰ÕÍ ½‘‘Ì€¬‰…¹‘¥Ğµ…µÀÁÉ•Í•¹”¸(€€€€€€€€€€€€€€€€€€€¥˜€¡¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡Ù…±Õ”°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È‘œ¤¤ì]½É±¹…¹•È€ô‘œì…ÁÁ±¥•¹‘ ‰‘…¹•Èˆ¤ìô(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€…Í”€‰Á±…¹•ĞµÑåÁ•Ìˆè(€€€€€€€€€€€€€€€€€€€€¼¼‘Ù…¹•Á•ÈµÑåÁ”Á…”è€‰½ÉÉÕÁÑ•õI…É”±½•…¸õÉ•ÅÕ•¹Ğ°¸¸¸ˆ€¡Õ¹­¹½İ¸­•åÌ…É”¥¹½É•(€€€€€€€€€€€€€€€€€€€€¼¼‰äÑ¡”Õ¹¥Ù•ÉÍ”•¹•É…Ñ½Èì…¸•µÁÑä‘¥Ğ­••ÁÌÑ¡”‘…Ñ„µ‘É¥Ù•¸ÍÁ…İ¸İ•¥¡ÑÌ¤¸(€€€€€€€€€€€€€€€€€€€™½É•… €¡Ù…ÈÁ…¥È¥¸Ù…±Õ”¹MÁ±¥Ğ œ°œ°MÑÉ¥¹MÁ±¥Ñ=ÁÑ¥½¹Ì¹I•µ½Ù•µÁÑå¹ÑÉ¥•Ì¤¤(€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€Ù…È­Ø€ôÁ…¥È¹MÁ±¥Ğ œôœ°€È¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜€¡­Ø¹1•¹Ñ €ôô€È€˜˜¹Õ´¹QÉåA…ÉÍ”ñ	±½­Í	•å½¹‘Q¡•MÑ…ÉÌ¹M¡…É•¹]½É±¹É•ÅÕ•¹äø¡­ÙlÅt¹QÉ¥´ ¤°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÑ˜¤¤(€€€€€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€]½É±¹A±…¹•ÑQåÁ•É•ÅÕ•¹¥•Ím­ÙlÁt¹QÉ¥´ ¥t€ôÑ˜ì(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€€€€€…ÁÁ±¥•¹‘ ‰Á±…¹•ĞµÑåÁ•Ìˆ¤ì(€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€ô(€€€€€€€ô((€€€€€€€É•ÑÕÉ¸…ÁÁ±¥•ì(€€€ô((€€€€¼¼¼€ñÍÕµµ…Éäø(€€€€¼¼¼ÁÁ±¥•Ì€ñŒù		M|¨ğ½Œø•¹Ù¥É½¹µ•¹ĞµÙ…É¥…‰±”½Ù•ÉÉ¥‘•Ì½¹Ñ¼Ñ¡¥Ì½¹™¥œƒŠPÑ¡”½¹™¥ÕÉ…Ñ¥½¸(€€€€¼¼¼¡…¹¹•°ÕÍ•İ¡•¸ÉÕ¹¹¥¹œ¥¸„½¹Ñ…¥¹•È€¡½­•È½½µÁ½Í”½-Õ‰•É¹•Ñ•Ì¤°İ¡•É”µ½Õ¹Ñ¥¹œ„(€€€€¼¼¼€ñŒùÍ•ÉÙ•È¹©Í½¸ğ½Œø¥Ì…İ­İ…É¸AÉ••‘•¹”¥Ì€ñŒùÍ•ÉÙ•È¹©Í½¸ğ½Œø€™±Ğì•¹Ù¥É½¹µ•¹Ğ€™±Ğì(€€€€¼¼¼½µµ…¹µ±¥¹”°Í¼…±°Ñ¡¥Ì…™Ñ•È€ñÍ•”É•˜ô‰1½…ˆ¼ø…¹‰•™½É”€ñÍ•”É•˜ô‰ÁÁ±å½µµ…¹‘1¥¹”ˆ¼ø¸(€€€€¼¼¼µÁÑä½Õ¹Í•ĞÙ…É¥…‰±•Ì…É”¥¹½É•ìÕ¹Á…ÉÍ•…‰±”Ù…±Õ•Ì…É”Í­¥ÁÁ•¸I•ÑÕÉ¹ÌÑ¡”…¹½¹¥…°(€€€€¼¼¼¹…µ•Ì½˜Ñ¡”­•åÌÑ¡…Ğİ•É”…ÁÁ±¥•¸(€€€€¼¼¼€ğ½ÍÕµµ…Éäø(€€€ÁÕ‰±¥Œ%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøÁÁ±å¹Ù¥É½¹µ•¹Ğ ¤(€€€ì(€€€€€€€Ù…È…ÁÁ±¥•€ô¹•Ü1¥ÍĞñÍÑÉ¥¹œø ¤ì((€€€€€€€ÍÑ…Ñ¥ŒÍÑÉ¥¹œü¹Ø¡ÍÑÉ¥¹œ¹…µ”¤(€€€€€€€ì(€€€€€€€€€€€Ù…ÈØ€ô¹Ù¥É½¹µ•¹Ğ¹•Ñ¹Ù¥É½¹µ•¹ÑY…É¥…‰±”¡¹…µ”¤ì(€€€€€€€€€€€É•ÑÕÉ¸ÍÑÉ¥¹œ¹%Í9Õ±±=ÉµÁÑä¡Ø¤€ü¹Õ±°€èØì(€€€€€€€ô((€€€€€€€¥˜€¡¹Ø ‰		M}MIYI}95ˆ¤¥ÌìôÍ•ÉÙ•É9…µ”¤ìM•ÉÙ•É9…µ”€ôÍ•ÉÙ•É9…µ”ì…ÁÁ±¥•¹‘ ‰		M}MIYI}95ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}]=I1ˆ¤¥Ììôİ½É±¤ì]½É±‘9…µ”€ôİ½É±ì…ÁÁ±¥•¹‘ ‰		M}]=I1ˆ¤ìô(€€€€€€€¥˜€ ¡¹Ø ‰		M}A=IPˆ¤€üü¹Ø ‰		M}5A1e}A=IPˆ¤¤¥ÌìôÁ½ÉÑMÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡Á½ÉÑMÑÈ°½ÕĞÙ…ÈÁ½ÉĞ¤¤ì…µ•Á±…åA½ÉĞ€ôÁ½ÉĞì…ÁÁ±¥•¹‘ ‰		M}A=IPˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}5%9}A=IPˆ¤¥Ììô…‘µ¥¹A½ÉÑMÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡…‘µ¥¹A½ÉÑMÑÈ°½ÕĞÙ…È…‘µ¥¹A½ÉĞ¤¤ì‘µ¥¹A½ÉĞ€ô…‘µ¥¹A½ÉĞì…ÁÁ±¥•¹‘ ‰		M}5%9}A=IPˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}5a}A1eILˆ¤¥Ììôµ…áMÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡µ…áMÑÈ°½ÕĞÙ…Èµ…à¤¤ì5…áA±…å•ÉÌ€ôµ…àì…ÁÁ±¥•¹‘ ‰		M}5a}A1eILˆ¤ìô(€€€€€€€¥˜€ ¡¹Ø ‰		M}AMM]=Iˆ¤€üü¹Ø ‰		M}MIYI}AMM]=Iˆ¤¤¥ÌìôÁÜ¤ìM•ÉÙ•ÉA…ÍÍİ½É€ôÁÜì…ÁÁ±¥•¹‘ ‰		M}AMM]=Iˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}5%9Lˆ¤¥Ììô…‘µ¥¹Ì¤ì‘µ¥¹A±…å•ÉÌ€ôMÁ±¥Ñ9…µ•Ì¡…‘µ¥¹Ì¤ì…ÁÁ±¥•¹‘ ‰		M}5%9Lˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}1Q}5%9Lˆ¤¥Ììô™±••Ñ‘µ¥¹Ì¤ì±••Ñ‘µ¥¹A±…å•ÉÌ€ôMÁ±¥Ñ9…µ•Ì¡™±••Ñ‘µ¥¹Ì¤ì…ÁÁ±¥•¹‘ ‰		M}1Q}5%9Lˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}5%9}AMM]=Iˆ¤¥Ììô…‘µ¥¹AÜ¤ì‘µ¥¹A…ÍÍİ½É€ô…‘µ¥¹AÜì…ÁÁ±¥•¹‘ ‰		M}5%9}AMM]=Iˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}5%9}	%9ˆ¤¥Ììô…‘µ¥¹	¥¹¤ì‘µ¥¹	¥¹‘‘‘É•ÍÌ€ô…‘µ¥¹	¥¹ì…ÁÁ±¥•¹‘ ‰		M}5%9}	%9ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}9	1}]	M=-Pˆ¤¥ÌìôİÍMÑÈ€˜˜‰½½°¹QÉåA…ÉÍ”¡İÍMÑÈ°½ÕĞÙ…ÈİÌ¤¤ì¹…‰±•]•‰M½­•Ğ€ôİÌì…ÁÁ±¥•¹‘ ‰		M}9	1}]	M=-Pˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}]	M=-Q}	%9ˆ¤¥ÌìôİÍ	¥¹¤ì]•‰M½­•Ñ	¥¹‘‘‘É•ÍÌ€ôİÍ	¥¹ì…ÁÁ±¥•¹‘ ‰		M}]	M=-Q}	%9ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}MYLˆ¤¥ÌìôÍ…Ù•Ì¤ìM…Ù•ÍI½½Ğ€ôÍ…Ù•Ìì…ÁÁ±¥•¹‘ ‰		M}MYLˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}Qˆ¤¥Ììô‘…Ñ„¤ì…Ñ…¥È€ô‘…Ñ„ì…ÁÁ±¥•¹‘ ‰		M}Qˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}UMI=9Q9Pˆ¤¥ÌìôÕÍ•É½¹Ñ•¹Ğ¤ìUÍ•É½¹Ñ•¹Ñ¥È€ôÕÍ•É½¹Ñ•¹Ğì…ÁÁ±¥•¹‘ ‰		M}UMI=9Q9Pˆ¤ìô(€€€€€€€¥˜€ ¡¹Ø ‰		M}Q	M}AI=Y%Hˆ¤€üü¹Ø ‰		M}Q	Mˆ¤¤¥Ììô‘…Ñ…‰…Í•AÉ½Ù¥‘•È¤ì…Ñ…‰…Í•AÉ½Ù¥‘•È€ô‘…Ñ…‰…Í•AÉ½Ù¥‘•Èì…ÁÁ±¥•¹‘ ‰		M}Q	M}AI=Y%Hˆ¤ìô(€€€€€€€¥˜€ ¡¹Ø ‰		M}A=MQIM}=99Q%=9}MQI%9ˆ¤€üü¹Ø ‰Q	M}UI0ˆ¤¤¥ÌìôÁœ¤ìA½ÍÑÉ•Í½¹¹•Ñ¥½¹MÑÉ¥¹œ€ôÁœì…ÁÁ±¥•¹‘ ‰		M}A=MQIM}=99Q%=9}MQI%9ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}Mˆ¤¥ÌìôÍ••‘MÑÈ€˜˜±½¹œ¹QÉåA…ÉÍ”¡Í••‘MÑÈ°½ÕĞÙ…ÈÍ••¤¤ìM••€ôÍ••ì…ÁÁ±¥•¹‘ ‰		M}Mˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}MQIQ}A19Pˆ¤¥ÌìôÍÑ…ÉÑA±…¹•Ğ¤ìMÑ…ÉÑA±…¹•Ğ€ôÍÑ…ÉÑA±…¹•Ğ¹QÉ¥´ ¤ì…ÁÁ±¥•¹‘ ‰		M}MQIQ}A19Pˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}Q%-}IQˆ¤¥ÌìôÑ¥­MÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡Ñ¥­MÑÈ°½ÕĞÙ…ÈÑ¥¬¤¤ìQ¥­I…Ñ”€ôÑ¥¬ì…ÁÁ±¥•¹‘ ‰		M}Q%-}IQˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}Y%]}%MQ9ˆ¤¥ÌìôÙ‘MÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡Ù‘MÑÈ°½ÕĞÙ…ÈÙ¤¤ìY¥•İ¥ÍÑ…¹•¡Õ¹­Ì€ôÙì…ÁÁ±¥•¹‘ ‰		M}Y%]}%MQ9ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}!U9-}MQI5}AI}Q%,ˆ¤¥ÌìôÍÁÑMÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡ÍÁÑMÑÈ°½ÕĞÙ…ÈÍÁĞ¤€˜˜ÍÁĞ€øô€Ä¤ì¡Õ¹­MÑÉ•…µA•ÉQ¥¬€ôÍÁĞì…ÁÁ±¥•¹‘ ‰		M}!U9-}MQI5}AI}Q%,ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}!U9-}MQI5}	UQ}5Lˆ¤¥ÌìôÍ‰MÑÈ€˜˜‘½Õ‰±”¹QÉåA…ÉÍ”¡Í‰MÑÈ°MåÍÑ•´¹±½‰…±¥é…Ñ¥½¸¹9Õµ‰•ÉMÑå±•Ì¹±½…Ğ°MåÍÑ•´¹±½‰…±¥é…Ñ¥½¸¹Õ±ÑÕÉ•%¹™¼¹%¹Ù…É¥…¹ÑÕ±ÑÕÉ”°½ÕĞÙ…ÈÍˆ¤€˜˜Íˆ€øô€À¤ì¡Õ¹­MÑÉ•…µ	Õ‘•Ñ5Ì€ôÍˆì…ÁÁ±¥•¹‘ ‰		M}!U9-}MQI5}	UQ}5Lˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}I}1%!Pˆ¤¥Ììô™™MÑÈ€˜˜‰½½°¹QÉåA…ÉÍ”¡™™MÑÈ°½ÕĞÙ…È™˜¤¤ìIÕ±•Ì¹É••MÁ…•±¥¡Ğ€ô™˜ì…ÁÁ±¥•¹‘ ‰		M}I}1%!Pˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}MA}=5	Pˆ¤¥ÌìôÍMÑÈ€˜˜¹Õ´¹QÉåA…ÉÍ”ñMÁ…•½µ‰…Ñ5½‘”ø¡ÍMÑÈ°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍŒ¤¤ìIÕ±•Ì¹MÁ…•½µ‰…Ğ€ôÍŒì…ÁÁ±¥•¹‘ ‰		M}MA}=5	Pˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}M!%A}]A=9Lˆ¤¥ÌìôÍİMÑÈ€˜˜¹Õ´¹QÉåA…ÉÍ”ñM¡¥Á]•…Á½¹5½‘”ø¡ÍİMÑÈ°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍÜ¤¤ìIÕ±•Ì¹M¡¥Á]•…Á½¹Ì€ôÍÜì…ÁÁ±¥•¹‘ ‰		M}M!%A}]A=9Lˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}MA}9ALˆ¤¥ÌìôÍ¹MÑÈ€˜˜¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡Í¹MÑÈ°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…ÈÍ¸¤¤ìIÕ±•Ì¹MÁ…•9Á¹•µ¥•Ì€ôÍ¸ì…ÁÁ±¥•¹‘ ‰		M}MA}9ALˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}	9%QLˆ¤¥Ììô‰¹MÑÈ€˜˜¹Õ´¹QÉåA…ÉÍ”ñ±¥•¹Ñ¥Ù¥Ñäø¡‰¹MÑÈ°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È‰¸¤¤ìIÕ±•Ì¹	…¹‘¥ÑÌ€ô‰¸ì…ÁÁ±¥•¹‘ ‰		M}	9%QLˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}%}1Y0ˆ¤¥Ììô…¥MÑÈ€˜˜¹Õ´¹QÉåA…ÉÍ”ñ¥1•Ù•°ø¡…¥MÑÈ°¥¹½É•…Í”èÑÉÕ”°½ÕĞÙ…È…¤¤¤ì¥1•Ù•°€ô…¤ì…ÁÁ±¥•¹‘ ‰		M}%}1Y0ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}%}	-9}UI0ˆ¤¥Ììô…¥UÉ°¤ì¥	…­•¹‘UÉ°€ô…¥UÉ°ì…ÁÁ±¥•¹‘ ‰		M}%}	-9}UI0ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}%}Q%5=UQ}M=9Lˆ¤¥Ììô…¥Q½MÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡…¥Q½MÑÈ°½ÕĞÙ…È…¥Q¼¤€˜˜…¥Q¼€ø€À¤ì¥Q¥µ•½ÕÑM•½¹‘Ì€ô…¥Q¼ì…ÁÁ±¥•¹‘ ‰		M}%}Q%5=UQ}M=9Lˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}IM!}IA=IQ}9A=%9Pˆ¤¥ÌìôÉ…Í¡UÉ°¤ìÉ…Í¡I•Á½ÉÑ¹‘Á½¥¹Ğ€ôÉ…Í¡UÉ°ì…ÁÁ±¥•¹‘ ‰		M}IM!}IA=IQ}9A=%9Pˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}IM!}IA=IQ}-dˆ¤¥ÌìôÉ…Í¡-•ä¤ìÉ…Í¡I•Á½ÉÑÁ¥-•ä€ôÉ…Í¡-•äì…ÁÁ±¥•¹‘ ‰		M}IM!}IA=IQ}-dˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}9=Q%e}UI0ˆ¤¥Ììô¹½Ñ¥™åUÉ°¤ì9½Ñ¥™åUÉ°€ô¹½Ñ¥™åUÉ°ì…ÁÁ±¥•¹‘ ‰		M}9=Q%e}UI0ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}	1=-}]=ILˆ¤¥Ììô‰±½­•‘]½É‘Ì¤ì	±½­•‘9…µ•]½É‘Ì¹‘‘I…¹”¡MÁ±¥Ñ9…µ•Ì¡‰±½­•‘]½É‘Ì¤¤ì…ÁÁ±¥•¹‘ ‰		M}	1=-}]=ILˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}]Q!}]=ILˆ¤¥Ììôİ…Ñ¡]½É‘Ì¤ì]…Ñ¡9…µ•]½É‘Ì¹‘‘I…¹”¡MÁ±¥Ñ9…µ•Ì¡İ…Ñ¡]½É‘Ì¤¤ì…ÁÁ±¥•¹‘ ‰		M}]Q!}]=ILˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}Y=%ˆ¤¥ÌìôÙ½¥•MÑÈ€˜˜‰½½°¹QÉåA…ÉÍ”¡Ù½¥•MÑÈ°½ÕĞÙ…ÈÙ½¥”¤¤ìY½¥•¡…Ñ¹…‰±•€ôÙ½¥”ì…ÁÁ±¥•¹‘ ‰		M}Y=%ˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}%1}M!UQ=]9}5%9UQLˆ¤¥Ììô¥‘±•MÑÈ€˜˜¥¹Ğ¹QÉåA…ÉÍ”¡¥‘±•MÑÈ°½ÕĞÙ…È¥‘±”¤¤ì%‘±•M¡ÕÑ‘½İ¹5¥¹ÕÑ•Ì€ô¥‘±”ì…ÁÁ±¥•¹‘ ‰		M}%1}M!UQ=]9}5%9UQLˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M})=%9}Q=-9}MIPˆ¤¥Ììô©½¥¹M•É•Ğ¤ì)½¥¹Q½­•¹M•É•Ğ€ô©½¥¹M•É•Ğì…ÁÁ±¥•¹‘ ‰		M})=%9}Q=-9}MIPˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}]=I1}=]9Hˆ¤¥Ììôİ½É±‘=İ¹•È¤ì]½É±‘=İ¹•É½Õ¹Ñ%€ôİ½É±‘=İ¹•Èì…ÁÁ±¥•¹‘ ‰		M}]=I1}=]9Hˆ¤ìô(€€€€€€€¥˜€¡¹Ø ‰		M}99=U9}Q=-8ˆ¤¥Ììô…¹¹½Õ¹•Q½­•¸¤ì¹¹½Õ¹•Q½­•¸€ô…¹¹½Õ¹•Q½­•¸ì…ÁÁ±¥•¹‘ ‰		M}99=U9}Q=-8ˆ¤ìô((€€€€€€€É•ÑÕÉ¸…ÁÁ±¥•ì(€€€ô((€€€€¼¼¼€ñÍÕµµ…ÉäùMÁ±¥ÑÌ„½µµ„µÍ•Á…É…Ñ•¹…µ”±¥ÍĞ°ÑÉ¥µµ¥¹œ•¹ÑÉ¥•Ì…¹‘É½ÁÁ¥¹œ•µÁÑ¥•Ì¸ğ½ÍÕµµ…Éäø(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ1¥ÍĞñÍÑÉ¥¹œøMÁ±¥Ñ9…µ•Ì¡ÍÑÉ¥¹œÙ…±Õ”¤(€€€€€€€€ôøÙ…±Õ”¹MÁ±¥Ğ œ°œ¤¹M•±•Ğ¡¸€ôø¸¹QÉ¥´ ¤¤¹]¡•É”¡¸€ôø¸¹1•¹Ñ €ø€À¤¹Q½1¥ÍĞ ¤ì)ô(
