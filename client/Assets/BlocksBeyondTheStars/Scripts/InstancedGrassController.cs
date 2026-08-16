@@ -22,7 +22,6 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int SeedId = Shader.PropertyToID("_BiomeSeed");
         private static readonly int PlayerPosId = Shader.PropertyToID("_PlayerPos");
         private static readonly int TrampleRadiusId = Shader.PropertyToID("_TrampleRadius");
-
         private static InstancedGrassController _instance;
 
         private sealed class DrawBatch
@@ -58,11 +57,7 @@ namespace BlocksBeyondTheStars.Client
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            if (_instance != null)
-            {
-                return;
-            }
-
+            if (_instance != null) return;
             var host = new GameObject("InstancedGrassController");
             DontDestroyOnLoad(host);
             _instance = host.AddComponent<InstancedGrassController>();
@@ -70,39 +65,22 @@ namespace BlocksBeyondTheStars.Client
 
         private void Update()
         {
-            if (Time.unscaledTime < _nextSetup)
-            {
-                return;
-            }
+            if (Time.unscaledTime < _nextSetup) return;
             _nextSetup = Time.unscaledTime + 0.25f;
 
-            if (_game == null)
-            {
-                _game = FindFirstObjectByType<GameBootstrap>();
-            }
-            if (_camera == null)
-            {
-                _camera = Camera.main;
-            }
+            if (_game == null) _game = FindFirstObjectByType<GameBootstrap>();
+            if (_camera == null) _camera = Camera.main;
 
             var settings = _game?.Settings;
             bool urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
             bool wanted = _game != null && _camera != null && settings != null && urp
                           && settings.Preset == QualityPreset.High && !settings.ReducedEffects
                           && !_game.SpaceViewActive && _game.Atlas != null && _game.Content != null;
-            if (!wanted)
-            {
-                _active = false;
-                return;
-            }
+            if (!wanted) { _active = false; return; }
 
             if (_material == null || _bladeMesh == null || _atlas != _game.Atlas.Texture)
             {
-                if (!BuildResources())
-                {
-                    _active = false;
-                    return;
-                }
+                if (!BuildResources()) { _active = false; return; }
             }
 
             if (_worldEpoch != _game.WorldEpoch)
@@ -125,10 +103,7 @@ namespace BlocksBeyondTheStars.Client
             DestroyResources();
             Shader shader = Resources.Load<Shader>("InstancedGrass") ?? Shader.Find("BlocksBeyondTheStars/InstancedGrass");
             var grass = _game?.Content?.GetBlock("grass");
-            if (shader == null || grass == null || grass.NumericId.Value == 0 || _game?.Atlas == null)
-            {
-                return false;
-            }
+            if (shader == null || grass == null || grass.NumericId.Value == 0 || _game?.Atlas == null) return false;
 
             _grassUv = _game.Atlas.TileUv(grass.NumericId.Value);
             _atlas = _game.Atlas.Texture;
@@ -137,7 +112,7 @@ namespace BlocksBeyondTheStars.Client
             {
                 name = "InstancedGrass",
                 enableInstancing = true,
-                renderQueue = 2998,
+                renderQueue = 2470,
             };
             _material.SetVector(GrassUvId, new Vector4(_grassUv.xMin, _grassUv.yMin, _grassUv.xMax, _grassUv.yMax));
             return true;
@@ -155,17 +130,11 @@ namespace BlocksBeyondTheStars.Client
             {
                 if (renderer == null || renderer.transform.parent != _game.transform
                     || !renderer.gameObject.name.StartsWith("Chunk ", StringComparison.Ordinal)
-                    || renderer.bounds.SqrDistance(cameraPos) > rangeSq)
-                {
-                    continue;
-                }
+                    || renderer.bounds.SqrDistance(cameraPos) > rangeSq) continue;
 
                 var filter = renderer.GetComponent<MeshFilter>();
                 Mesh mesh = filter != null ? filter.sharedMesh : null;
-                if (mesh == null || mesh.subMeshCount < 1)
-                {
-                    continue;
-                }
+                if (mesh == null || mesh.subMeshCount < 1) continue;
 
                 int key = renderer.GetInstanceID();
                 alive.Add(key);
@@ -179,16 +148,8 @@ namespace BlocksBeyondTheStars.Client
 
             var remove = new List<int>();
             foreach (var kv in _batches)
-            {
-                if (!alive.Contains(kv.Key) || kv.Value.Renderer == null)
-                {
-                    remove.Add(kv.Key);
-                }
-            }
-            foreach (int key in remove)
-            {
-                _batches.Remove(key);
-            }
+                if (!alive.Contains(kv.Key) || kv.Value.Renderer == null) remove.Add(kv.Key);
+            foreach (int key in remove) _batches.Remove(key);
         }
 
         private DrawBatch BuildBatch(MeshRenderer renderer, Mesh mesh, uint indexCount)
@@ -217,28 +178,26 @@ namespace BlocksBeyondTheStars.Client
                 int ib = indices[tri + 1];
                 int ic = indices[tri + 2];
                 if (ia >= _vertices.Count || ib >= _vertices.Count || ic >= _vertices.Count
-                    || ia >= _uvs.Count || ib >= _uvs.Count || ic >= _uvs.Count)
+                    || ia >= _uvs.Count || ib >= _uvs.Count || ic >= _uvs.Count) continue;
+
+                // Use the authored/mesher vertex normal rather than triangle winding: either clockwise convention
+                // can be valid, but only genuinely world-UP grass surfaces should grow blades.
+                Vector3 avgNormal = Vector3.up;
+                if (ia < _normals.Count && ib < _normals.Count && ic < _normals.Count)
                 {
-                    continue;
+                    avgNormal = l2w.MultiplyVector((_normals[ia] + _normals[ib] + _normals[ic]) / 3f).normalized;
                 }
+                if (avgNormal.y < 0.72f) continue;
+
+                Vector2 uv = (_uvs[ia] + _uvs[ib] + _uvs[ic]) / 3f;
+                if (uv.x < _grassUv.xMin || uv.x > _grassUv.xMax || uv.y < _grassUv.yMin || uv.y > _grassUv.yMax) continue;
 
                 Vector3 a = l2w.MultiplyPoint3x4(_vertices[ia]);
                 Vector3 b = l2w.MultiplyPoint3x4(_vertices[ib]);
                 Vector3 c = l2w.MultiplyPoint3x4(_vertices[ic]);
-                Vector3 faceN = Vector3.Cross(b - a, c - a);
-                float doubleArea = faceN.magnitude;
-                if (doubleArea < 0.001f || Mathf.Abs(faceN.normalized.y) < 0.72f)
-                {
-                    continue;
-                }
+                float area = Vector3.Cross(b - a, c - a).magnitude * 0.5f;
+                if (area < 0.001f) continue;
 
-                Vector2 uv = (_uvs[ia] + _uvs[ib] + _uvs[ic]) / 3f;
-                if (uv.x < _grassUv.xMin || uv.x > _grassUv.xMax || uv.y < _grassUv.yMin || uv.y > _grassUv.yMax)
-                {
-                    continue;
-                }
-
-                float area = doubleArea * 0.5f;
                 int samples = Mathf.Clamp(Mathf.RoundToInt(area * DensityPerSquareMetre), 1, 3);
                 for (int s = 0; s < samples && _matrixScratch.Count < MaxBladesPerChunk; s++)
                 {
@@ -249,7 +208,6 @@ namespace BlocksBeyondTheStars.Client
                     float v = r2 * sr1;
                     float w = 1f - u - v;
                     Vector3 p = a * u + b * v + c * w + Vector3.up * 0.012f;
-
                     float yaw = Hash01(tri + 193, s + 29, renderer.GetInstanceID()) * 360f;
                     float height = Mathf.Lerp(0.34f, 0.68f, Hash01(tri + 389, s + 43, _worldEpoch + 911));
                     float width = Mathf.Lerp(0.70f, 1.15f, Hash01(tri + 557, s + 59, renderer.GetInstanceID()));
@@ -269,11 +227,7 @@ namespace BlocksBeyondTheStars.Client
 
         private void LateUpdate()
         {
-            if (!_active || _game == null || _camera == null || _material == null || _bladeMesh == null || _game.SpaceViewActive)
-            {
-                return;
-            }
-
+            if (!_active || _game == null || _camera == null || _material == null || _bladeMesh == null || _game.SpaceViewActive) return;
             Vector3 player = _game.PlayerPosition;
             _material.SetFloat(TimeId, _game.WorldTime);
             _material.SetFloat(WindId, Mathf.Clamp01(_game.WindSpeed));
@@ -283,19 +237,13 @@ namespace BlocksBeyondTheStars.Client
 
             foreach (var batch in _batches.Values)
             {
-                if (batch.Renderer == null || !batch.Renderer.enabled || !batch.Renderer.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
+                if (batch.Renderer == null || !batch.Renderer.enabled || !batch.Renderer.gameObject.activeInHierarchy) continue;
                 int layer = batch.Renderer.gameObject.layer;
                 foreach (var group in batch.Groups)
                 {
                     if (group.Length > 0)
-                    {
                         Graphics.DrawMeshInstanced(_bladeMesh, 0, _material, group, group.Length, null,
                             UnityEngine.Rendering.ShadowCastingMode.Off, true, layer, _camera);
-                    }
                 }
             }
         }
@@ -306,8 +254,8 @@ namespace BlocksBeyondTheStars.Client
             var mesh = new Mesh { name = "VoidcraftGrassBlade" };
             mesh.vertices = new[]
             {
-                new Vector3(-half, 0, 0), new Vector3(half, 0, 0), new Vector3(-half * 0.25f, 1, 0), new Vector3(half * 0.25f, 1, 0),
-                new Vector3(0, 0, -half), new Vector3(0, 0, half), new Vector3(0, 1, -half * 0.25f), new Vector3(0, 1, half * 0.25f),
+                new Vector3(-half,0,0), new Vector3(half,0,0), new Vector3(-half*0.25f,1,0), new Vector3(half*0.25f,1,0),
+                new Vector3(0,0,-half), new Vector3(0,0,half), new Vector3(0,1,-half*0.25f), new Vector3(0,1,half*0.25f),
             };
             mesh.uv = new[]
             {
@@ -335,11 +283,7 @@ namespace BlocksBeyondTheStars.Client
             unchecked
             {
                 ulong h = (ulong)worldSeed ^ 1469598103934665603UL;
-                foreach (char c in location ?? string.Empty)
-                {
-                    h ^= c;
-                    h *= 1099511628211UL;
-                }
+                foreach (char c in location ?? string.Empty) { h ^= c; h *= 1099511628211UL; }
                 return (h & 0xFFFFFFUL) / 16777215f;
             }
         }
@@ -357,10 +301,7 @@ namespace BlocksBeyondTheStars.Client
         private void OnDestroy()
         {
             DestroyResources();
-            if (_instance == this)
-            {
-                _instance = null;
-            }
+            if (_instance == this) _instance = null;
         }
     }
 }

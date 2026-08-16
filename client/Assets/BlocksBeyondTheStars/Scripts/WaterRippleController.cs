@@ -7,13 +7,10 @@ using UnityEngine;
 namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
-    /// Presentation-only interactive water rings. Uses the authoritative rendered world to determine when the
-    /// local player's feet touch a water block, emits a tiny bounded ring history, and redraws only nearby terrain
-    /// transparent submesh 1 through an additive water-only overlay shader. Existing water depth/refraction/SSR
-    /// remains the owner of the surface; this layer only adds interaction feedback.
-    ///
-    /// Inspired by the event-driven ripple / wave-interaction ideas in Christian Ortiz' MIT stylized-components
-    /// WaterFloor study. This is an original Unity implementation and imports no Three.js source or assets.
+    /// Presentation-only interactive water rings. Uses the rendered client world to determine when the local
+    /// player's feet touch water, keeps a tiny bounded ring history, and redraws only nearby transparent terrain
+    /// through an additive water-only overlay. The existing water shader remains responsible for depth/refraction/SSR.
+    /// Inspired by Christian Ortiz' MIT stylized-components water study; this is original Unity C#/HLSL.
     /// </summary>
     public sealed class WaterRippleController : MonoBehaviour
     {
@@ -22,21 +19,10 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int RipplesId = Shader.PropertyToID("_Ripples");
         private static readonly int StrengthsId = Shader.PropertyToID("_RippleStrengths");
         private static readonly int RippleTimeId = Shader.PropertyToID("_RippleTime");
-
         private static WaterRippleController _instance;
 
-        private sealed class ChunkDraw
-        {
-            public MeshRenderer Renderer;
-            public MeshFilter Filter;
-        }
-
-        private struct Ripple
-        {
-            public Vector3 Center;
-            public float Start;
-            public float Strength;
-        }
+        private sealed class ChunkDraw { public MeshRenderer Renderer; public MeshFilter Filter; }
+        private struct Ripple { public Vector3 Center; public float Start; public float Strength; }
 
         private readonly List<ChunkDraw> _chunks = new List<ChunkDraw>(256);
         private readonly List<MeshRenderer> _scan = new List<MeshRenderer>(512);
@@ -55,6 +41,7 @@ namespace BlocksBeyondTheStars.Client
         private float _lastSurfaceY;
         private Vector3 _lastPlayerPos;
         private bool _haveLastPos;
+        private float _lastSampleRealtime;
         private float _lastMoveEmit = -100f;
         private float _nextSetup;
         private float _nextScan;
@@ -65,10 +52,7 @@ namespace BlocksBeyondTheStars.Client
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            if (_instance != null)
-            {
-                return;
-            }
+            if (_instance != null) return;
             var host = new GameObject("WaterRippleController");
             DontDestroyOnLoad(host);
             _instance = host.AddComponent<WaterRippleController>();
@@ -76,29 +60,20 @@ namespace BlocksBeyondTheStars.Client
 
         private void Update()
         {
-            if (Time.unscaledTime < _nextSetup)
-            {
-                return;
-            }
+            if (Time.unscaledTime < _nextSetup) return;
             _nextSetup = Time.unscaledTime + 0.15f;
 
             if (_game == null)
             {
                 _game = FindFirstObjectByType<GameBootstrap>();
                 _waterId = 0;
+                _haveLastPos = false;
             }
-            if (_camera == null)
-            {
-                _camera = Camera.main;
-            }
+            if (_camera == null) _camera = Camera.main;
             if (_shader == null)
-            {
                 _shader = Resources.Load<Shader>("WaterInteraction") ?? Shader.Find("BlocksBeyondTheStars/WaterInteraction");
-            }
             if (_waterId == 0 && _game?.Content?.GetBlock("water") is { } water)
-            {
                 _waterId = water.NumericId.Value;
-            }
 
             var settings = _game?.Settings;
             bool urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
@@ -114,13 +89,7 @@ namespace BlocksBeyondTheStars.Client
             }
 
             if (_material == null)
-            {
-                _material = new Material(_shader)
-                {
-                    name = "WaterInteraction",
-                    renderQueue = 3100,
-                };
-            }
+                _material = new Material(_shader) { name = "WaterInteraction", renderQueue = 3100 };
 
             _range = settings.Preset == QualityPreset.High ? 36f : 25f;
             _qualityLimit = settings.Preset == QualityPreset.High ? MaxRipples : 5;
@@ -131,26 +100,25 @@ namespace BlocksBeyondTheStars.Client
                 _nextScan = Time.unscaledTime + 0.85f;
                 ScanChunks();
             }
-
             UpdateRippleEvents();
         }
 
         private void UpdateRippleEvents()
         {
-            if (_game?.World == null)
-            {
-                return;
-            }
+            if (_game?.World == null) return;
 
             Vector3 p = _game.PlayerPosition;
             float now = _game.WorldTime;
+            float realtime = Time.unscaledTime;
             float speed = 0f;
             if (_haveLastPos)
             {
+                float dt = Mathf.Max(0.001f, realtime - _lastSampleRealtime);
                 Vector2 delta = new Vector2(p.x - _lastPlayerPos.x, p.z - _lastPlayerPos.z);
-                speed = delta.magnitude / Mathf.Max(Time.unscaledDeltaTime, 0.001f);
+                speed = delta.magnitude / dt;
             }
             _lastPlayerPos = p;
+            _lastSampleRealtime = realtime;
             _haveLastPos = true;
 
             bool inWater = TryFindSurface(p, out float surfaceY);
@@ -164,8 +132,7 @@ namespace BlocksBeyondTheStars.Client
                 }
                 else if (speed > 0.22f && now - _lastMoveEmit >= Mathf.Lerp(0.34f, 0.16f, Mathf.Clamp01(speed / 6f)))
                 {
-                    float strength = Mathf.Lerp(0.30f, 0.78f, Mathf.Clamp01(speed / 6f));
-                    Emit(new Vector3(p.x, surfaceY, p.z), now, strength);
+                    Emit(new Vector3(p.x, surfaceY, p.z), now, Mathf.Lerp(0.30f, 0.78f, Mathf.Clamp01(speed / 6f)));
                     _lastMoveEmit = now;
                 }
             }
@@ -173,7 +140,6 @@ namespace BlocksBeyondTheStars.Client
             {
                 Emit(new Vector3(p.x, _lastSurfaceY, p.z), now, 0.72f);
             }
-
             _wasInWater = inWater;
         }
 
@@ -183,29 +149,17 @@ namespace BlocksBeyondTheStars.Client
             int x = Mathf.FloorToInt(player.x);
             int z = Mathf.FloorToInt(player.z);
             int baseY = Mathf.FloorToInt(player.y + 0.1f);
-
             int waterY = int.MinValue;
             for (int y = baseY - 1; y <= baseY + 1; y++)
             {
-                if (_game.World.GetBlock(x, y, z).Value == _waterId)
-                {
-                    waterY = y;
-                    break;
-                }
+                if (_game.World.GetBlock(x, y, z).Value == _waterId) { waterY = y; break; }
             }
-            if (waterY == int.MinValue)
-            {
-                return false;
-            }
+            if (waterY == int.MinValue) return false;
 
-            // Find the top of the local water column so every ring sits on the visible surface, not at the feet.
             int top = waterY;
             for (int y = waterY + 1; y <= waterY + 12; y++)
             {
-                if (_game.World.GetBlock(x, y, z).Value != _waterId)
-                {
-                    break;
-                }
+                if (_game.World.GetBlock(x, y, z).Value != _waterId) break;
                 top = y;
             }
             surfaceY = top + 1f;
@@ -227,32 +181,18 @@ namespace BlocksBeyondTheStars.Client
             foreach (var renderer in _scan)
             {
                 if (renderer == null || renderer.transform.parent != _game.transform
-                    || !renderer.gameObject.name.StartsWith("Chunk ", StringComparison.Ordinal))
-                {
-                    continue;
-                }
+                    || !renderer.gameObject.name.StartsWith("Chunk ", StringComparison.Ordinal)) continue;
                 var filter = renderer.GetComponent<MeshFilter>();
-                if (filter != null)
-                {
-                    _chunks.Add(new ChunkDraw { Renderer = renderer, Filter = filter });
-                }
+                if (filter != null) _chunks.Add(new ChunkDraw { Renderer = renderer, Filter = filter });
             }
         }
 
         private void LateUpdate()
         {
-            if (!_active || _game == null || _camera == null || _material == null || _game.SpaceViewActive)
-            {
-                return;
-            }
+            if (!_active || _game == null || _camera == null || _material == null || _game.SpaceViewActive) return;
 
             int count = Mathf.Min(_rippleCount, _qualityLimit);
-            float now = _game.WorldTime;
-            for (int i = 0; i < MaxRipples; i++)
-            {
-                _packed[i] = Vector4.zero;
-                _strengths[i] = 0f;
-            }
+            for (int i = 0; i < MaxRipples; i++) { _packed[i] = Vector4.zero; _strengths[i] = 0f; }
             for (int i = 0; i < count; i++)
             {
                 int index = (_writeIndex - 1 - i + MaxRipples) % MaxRipples;
@@ -264,25 +204,16 @@ namespace BlocksBeyondTheStars.Client
             _material.SetInt(RippleCountId, count);
             _material.SetVectorArray(RipplesId, _packed);
             _material.SetFloatArray(StrengthsId, _strengths);
-            _material.SetFloat(RippleTimeId, now);
+            _material.SetFloat(RippleTimeId, _game.WorldTime);
 
             Vector3 cameraPos = _camera.transform.position;
             float rangeSq = _range * _range;
             foreach (var chunk in _chunks)
             {
                 if (chunk?.Renderer == null || chunk.Filter == null || !chunk.Renderer.enabled
-                    || !chunk.Renderer.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
+                    || !chunk.Renderer.gameObject.activeInHierarchy) continue;
                 Mesh mesh = chunk.Filter.sharedMesh;
-                if (mesh == null || mesh.subMeshCount < 2 || chunk.Renderer.bounds.SqrDistance(cameraPos) > rangeSq)
-                {
-                    continue;
-                }
-
-                // Submesh 1 owns transparent blocks. The shader itself clips every fragment that is not a top
-                // water surface by its existing TEXCOORD2 water mode, so glass and force fields never receive rings.
+                if (mesh == null || mesh.subMeshCount < 2 || chunk.Renderer.bounds.SqrDistance(cameraPos) > rangeSq) continue;
                 Graphics.DrawMesh(mesh, chunk.Renderer.localToWorldMatrix, _material,
                     chunk.Renderer.gameObject.layer, _camera, 1);
             }
@@ -290,16 +221,10 @@ namespace BlocksBeyondTheStars.Client
 
         private void OnDestroy()
         {
-            if (_material != null)
-            {
-                Destroy(_material);
-            }
+            if (_material != null) Destroy(_material);
             _chunks.Clear();
             _scan.Clear();
-            if (_instance == this)
-            {
-                _instance = null;
-            }
+            if (_instance == this) _instance = null;
         }
     }
 }
