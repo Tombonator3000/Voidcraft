@@ -101,6 +101,7 @@ jobs:
           set +e
           timeout 300s xvfb-run -a -s "-screen 0 1920x1080x24" \
             ./player-linux/BlocksBeyondTheStars.x86_64 \
+            -force-glcore \
             -captureShots \
             -shotOut "$PWD/captures/en" \
             -seed 424242 \
