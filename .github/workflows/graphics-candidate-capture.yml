@@ -112,11 +112,35 @@ jobs:
             -logFile "$PWD/capture-player.log"
           code=$?
           set -e
-          echo "capture exit code=$code"
+          echo "main capture exit code=$code"
           test "$code" -eq 0
-          ls -lh captures/en
           test -s captures/en/planet_surface.png
           test -s captures/en/space_flight.png
+
+      - name: Capture jungle turf frame
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set +e
+          timeout 300s xvfb-run -a -s "-screen 0 1920x1080x24" \
+            ./player-linux/BlocksBeyondTheStars.x86_64 \
+            -force-glcore \
+            -captureShots \
+            -planet jungle \
+            -shotOut "$PWD/captures/en" \
+            -seed 424242 \
+            -lang en \
+            -screen-width 1920 \
+            -screen-height 1080 \
+            -screen-fullscreen 0 \
+            -logFile "$PWD/capture-jungle.log"
+          code=$?
+          set -e
+          echo "jungle capture exit code=$code"
+          test "$code" -eq 0
+          test -s captures/en/surface_jungle.png
+          ls -lh captures/en
 
       - name: Package candidate player
         shell: bash
@@ -132,6 +156,7 @@ jobs:
           path: |
             captures
             capture-player.log
+            capture-jungle.log
           if-no-files-found: warn
           retention-days: 7
 
