@@ -66,8 +66,17 @@ namespace BlocksBeyondTheStars.Client
 
             _nextProbe = Time.unscaledTime + 0.2f;
 
-            _game ??= FindFirstObjectByType<GameBootstrap>();
-            _space ??= FindFirstObjectByType<SpaceView>();
+            // UnityEngine.Object has a special destroyed-object null state. Use Unity's overloaded null check
+            // rather than ??= so a menu/world transition can reacquire components that Unity has destroyed.
+            if (_game == null)
+            {
+                _game = FindFirstObjectByType<GameBootstrap>();
+            }
+
+            if (_space == null)
+            {
+                _space = FindFirstObjectByType<SpaceView>();
+            }
 
             var env = _game?.Environment;
             if (_game == null || _space == null || !_game.SpaceViewActive || env == null || env.SpaceSky)
