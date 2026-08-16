@@ -1,0 +1,129 @@
+name: Graphics baseline capture
+
+on:
+  push:
+    branches:
+      - test/graphics-baseline-capture
+
+permissions:
+  contents: read
+
+concurrency:
+  group: graphics-baseline-capture-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYTEST_VERSION: 0.1.0-graphics-baseline.${{ github.run_number }}
+
+jobs:
+  build-and-capture:
+    name: Build Kubuntu baseline and capture frames
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: Check Unity build credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=()
+          [ -n "$UNITY_LICENSE" ] || missing+=(UNITY_LICENSE)
+          [ -n "$UNITY_EMAIL" ] || missing+=(UNITY_EMAIL)
+          [ -n "$UNITY_PASSWORD" ] || missing+=(UNITY_PASSWORD)
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository Actions secrets: ${missing[*]}."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sync shared libraries and content
+        run: ./scripts/sync-client-libs.sh
+
+      - name: Sync desktop updater libraries
+        run: ./scripts/sync-velopack-libs.sh
+
+      - name: Publish bundled local server
+        run: ./scripts/publish-local-server.sh linux-x64 ${{ env.PLAYTEST_VERSION }}
+
+      - name: Free disk space for Unity
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
+          df -h /
+
+      - name: Build Linux player
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: client
+          unityVersion: 6000.4.9f1
+          targetPlatform: StandaloneLinux64
+          buildMethod: BlocksBeyondTheStars.Client.EditorTools.BuildScript.BuildLinux
+          versioning: Custom
+          version: ${{ env.PLAYTEST_VERSION }}
+          customParameters: -buildOut /github/workspace/player-linux
+          allowDirtyBuild: true
+
+      - name: Prepare Linux player
+        shell: bash
+        run: |
+          sudo chmod -R a+rwX player-linux
+          sudo chmod +x player-linux/BlocksBeyondTheStars.x86_64
+          sudo chmod +x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
+          test -x player-linux/BlocksBeyondTheStars.x86_64
+          test -x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
+
+      - name: Install virtual display runtime
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libgl1-mesa-dri libglu1-mesa libasound2t64
+
+      - name: Capture baseline frames
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          mkdir -p captures/en
+          set +e
+          timeout 300s xvfb-run -a -s "-screen 0 1920x1080x24" \
+            ./player-linux/BlocksBeyondTheStars.x86_64 \
+            -force-glcore \
+            -captureShots \
+            -shotOut "$PWD/captures/en" \
+            -seed 424242 \
+            -lang en \
+            -screen-width 1920 \
+            -screen-height 1080 \
+            -screen-fullscreen 0 \
+            -logFile "$PWD/capture-player.log"
+          code=$?
+          set -e
+          echo "capture exit code=$code"
+          test "$code" -eq 0
+          ls -lh captures/en
+          test -s captures/en/planet_surface.png
+          test -s captures/en/space_flight.png
+
+      - name: Upload baseline frames
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Voidcraft-Graphics-Baseline-Captures-${{ github.run_number }}
+          path: |
+            captures
+            capture-player.log
+          if-no-files-found: warn
+          retention-days: 7
