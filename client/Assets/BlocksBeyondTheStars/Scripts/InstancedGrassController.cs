@@ -41,6 +41,7 @@ namespace BlocksBeyondTheStars.Client
         private readonly List<Matrix4x4> _matrixScratch = new List<Matrix4x4>(1024);
 
         private GameBootstrap _game;
+        private GameBootstrap _subscribedGame;
         private Camera _camera;
         private Material _material;
         private Mesh _bladeMesh;
@@ -70,6 +71,19 @@ namespace BlocksBeyondTheStars.Client
 
             if (_game == null) _game = FindFirstObjectByType<GameBootstrap>();
             if (_camera == null) _camera = Camera.main;
+
+            // GameBootstrap intentionally reuses each chunk's Unity Mesh on remesh. A grass->dirt edit can keep
+            // the same mesh object AND the same vertex/index count, so those are not sufficient cache-version
+            // signals. Invalidate from the existing authoritative block-change presentation event instead.
+            if (_game != null && _subscribedGame != _game)
+            {
+                _subscribedGame = _game;
+                _subscribedGame.BlockChangeApplied += (_, _, _) =>
+                {
+                    _batches.Clear();
+                    _nextScan = 0f;
+                };
+            }
 
             var settings = _game?.Settings;
             bool urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
