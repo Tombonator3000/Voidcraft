@@ -68,7 +68,7 @@ public sealed class GameServerNetFragmentTests : IDisposable
     [Fact]
     public void Placed_fragments_are_valid_pack_keys_and_unique()
     {
-        var packKeys = new HashSet<string>(_content.Stories["vega_protocol"].Fragments.Select(f => f.Key));
+        var packKeys = new HashSet<string>(_content.DefaultStory.Fragments.Select(f => f.Key));
         Run("valid", 5, s =>
         {
             var keys = s.NetFragmentSnapshots.Select(f => f.Key).ToList();

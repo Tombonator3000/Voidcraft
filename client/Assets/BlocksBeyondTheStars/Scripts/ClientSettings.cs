@@ -211,9 +211,9 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>Last singleplayer world the player launched (pre-selected in the world picker).</summary>
         public string LastWorld = "singleplayer";
 
-        /// <summary>The official Velopack update feed: the GitHub repository, whose release assets carry
+        /// <summary>The Voidcraft Velopack update feed: the fork's GitHub repository, whose release assets carry
         /// the feed manifest + payload (read via Velopack's GithubSource — see <see cref="ClientUpdater"/>).</summary>
-        public const string DefaultUpdateFeedUrl = "https://github.com/marceld23/BlocksBeyondTheStars";
+        public const string DefaultUpdateFeedUrl = "https://github.com/Tombonator3000/Voidcraft";
 
         /// <summary>Velopack auto-update feed URL. Defaults to the official GitHub feed
         /// (<see cref="DefaultUpdateFeedUrl"/>); self-hosters can point it at their server's update
@@ -247,8 +247,8 @@ namespace BlocksBeyondTheStars.Client
         /// under a name claims it, later joins must match. Generated once on load, never shown in UI.</summary>
         public string PlayerToken = "";
 
-        /// <summary>Base URL of the official worlds portal (hosted-worlds control plane). Kept as a setting
-        /// so self-hosters can point the menu at their own WorldHost; empty = the official default.</summary>
+        /// <summary>Base URL of an optional worlds portal (hosted-worlds control plane). Voidcraft has no
+        /// official hosted service yet; self-hosters can point the menu at their own WorldHost.</summary>
         public string PortalUrl = "";
 
         /// <summary>Bearer session for the worlds portal, saved after a successful sign-in so the menu stays

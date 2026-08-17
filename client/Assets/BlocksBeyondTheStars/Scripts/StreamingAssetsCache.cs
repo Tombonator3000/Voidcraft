@@ -81,6 +81,9 @@ namespace BlocksBeyondTheStars.Client
             "stories/vega_protocol/locales/uk.json",
             "stories/vega_protocol/locales/zh.json",
             "stories/vega_protocol/story.json",
+            "stories/voidcraft_awakening/locales/de.json",
+            "stories/voidcraft_awakening/locales/en.json",
+            "stories/voidcraft_awakening/story.json",
             "wiki/articles.json",
         };
 

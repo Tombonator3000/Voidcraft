@@ -1,4 +1,4 @@
-# Blocks Beyond the Stars — User Manual
+# Voidcraft — User Manual
 
 The central reference for **how to play**: controls, game mechanics, the in-game editors, and the
 chat/admin commands. This is a living document.
@@ -10,6 +10,10 @@ chat/admin commands. This is a living document.
 > Italian are in progress.)
 
 Last updated: 2026-08-11.
+
+> **Pre-release note:** Voidcraft does not yet publish its own client or hosted-world service. Launcher names
+> and upstream online-service references below describe the inherited Blocks Beyond the Stars foundation until
+> the fork's distribution infrastructure is separated.
 
 ---
 
@@ -361,6 +365,19 @@ separate unlock; admins can still disable it through server world rules.
   never hard-blocks when you're short. Only the **ship's owner** can repair it. There is no passive hull regen.
 - **Lost ships (if "Keep ship on death" is off):** a destroyed ship becomes a **downed wreck on your landing
   pad**. Repair it through this same flow — restore the hull and refill every missing cell and it can fly again.
+
+### Voidcraft — The Sleeper Signal
+
+- New worlds default to **The Sleeper Signal**, a cosmic-horror story pack that begins with an erased ship log
+  and a repeating signal beneath the landing site. Choose the story-off/sandbox option when creating a world
+  if you want progression without the campaign.
+- Story progress is shared by the save: recover world fragments, defeat hostile machines and complete major
+  exploration/settlement milestones. Thresholds keep the arc moving even when procedural exploration happens
+  in a different order.
+- Open **Tab → Story** to reread revealed beats, fragments and personal memories. Finishing the arc reveals a
+  final system and a non-weapon dialogue confrontation.
+- The original **VEGA Protocol** data pack remains bundled for compatible servers and saves. A full story-pack
+  selector in the world-creation UI is still planned.
 
 ### VEGA — the ship AI
 - **Onboarding (new worlds):** VEGA guides you through an 8-stage chain (mine → craft → scan → unlock a

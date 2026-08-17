@@ -846,7 +846,7 @@ namespace BlocksBeyondTheStars.Client
         /// (animated machines) and used for the roster-filtered production terminal.</summary>
         public NetFactory[] Factories { get; private set; } = System.Array.Empty<NetFactory>();
 
-        // --- Story system ("The VEGA Protocol") ---
+        // --- Story system ---
 
         /// <summary>The active story's shared progress (story P0) — drives the Story Log meter; null/inactive when off.</summary>
         public StoryStateMessage Story { get; private set; }

@@ -1,4 +1,4 @@
-# Story engine ("The VEGA Protocol") — how it works
+# Story engine — how it works
 
 Status: implemented (see [../../TODO.md](../../TODO.md) for live Done/Open status). Last updated 2026-06-19.
 
@@ -9,14 +9,15 @@ the *canon* (lore) lives in [LORE_STRUCTURE.md](LORE_STRUCTURE.md). This file do
 ## Overview
 
 The engine is **story-agnostic**: each storyline is a swappable **story pack** (content + config) and the
-world picks which one is active (default `vega_protocol`, or `none`/sandbox). The engine drives a per-save,
+world picks which one is active (default `voidcraft_awakening`, or `none`/sandbox). The engine drives a per-save,
 per-story state through threshold-paced narrator beats, world-found text fragments, combat-driven progress,
 personal player memories, a visible progress meter, a re-readable **Story Log tab**, and a multi-stage
 dialogue-duel finale. Server stays authoritative; every in-game string ships bilingual DE+EN.
 
-The first pack — *The VEGA Protocol* — is the amnesiac ship-AI VEGA recovering the SPS truth, the player
-revealed as a clone, and the galaxy's machines (UFO drones, three-eyed ground robots, scan-drones) revealed
-as remnants of the dormant Guardian core, pacified in the finale by exposing its contradiction.
+The default pack — *Voidcraft: The Sleeper Signal* — follows an erased arrival log, the ancient Veyl and
+world-shells built around a lattice of buried Anchors. The original *VEGA Protocol* remains bundled as an
+optional/compatibility pack. Both reuse the galaxy's machines and pacify the finale core by exposing its
+contradiction.
 
 ## How it works
 
@@ -85,7 +86,8 @@ Beat speech reuses `ShipAiLine`. Every message is `Register()`'d in NetCodec.
   knowledge level), `GameServerNetFragments.cs` (placement + pickup), `GameServerStoryFinale.cs` (reveal,
   hack, duel, gauntlet, chamber stamping, respawn, pacification).
 - Persistence: `story_state` table (`StoredStoryState` + `IWorldRepository.SaveStoryState`/`ListStoryStates`).
-- Data: `data/stories/vega_protocol/` (`story.json` + `locales/{en,de}.json`), `tools/merge_story.py` validator.
+- Data: `data/stories/voidcraft_awakening/` and `data/stories/vega_protocol/` (`story.json` +
+  `locales/{en,de}.json`), validated by `tools/merge_story.py`.
 - Client: `Mode.Story`/`Tab.Story` Story Log tab (meter + re-readable beats/fragments/memories);
   `WorldEntities.cs` three-eyed-robot retheme + `BuildDrone` scan-drone; `FinaleView` (hack bar + duel panel);
   `ClientMusic` finale contexts → `music_boss_*` tracks.
@@ -94,8 +96,9 @@ Beat speech reuses `ShipAiLine`. Every message is `Register()`'d in NetCodec.
 
 ## Adding another storyline
 
-Add a pack under `data/stories/<id>/` — no engine edits. A pack is "story-complete" only once its beats,
-fragments, memories, flavour and `coreArguments` are authored + translated (DE+EN), per LORE_STRUCTURE.
+Add a pack under `data/stories/<id>/` and a built-in fallback in `StoryRegistry`. A pack is "story-complete"
+only once its beats, finale/insight keys, fragments, memories, flavour and `coreArguments` are authored +
+translated (DE+EN), per LORE_STRUCTURE. Run `python tools/merge_story.py data/stories/<id>` before committing.
 
 ## Known remaining gaps / deferred
 

@@ -37,6 +37,9 @@ public sealed partial class GameServer
     private List<ServerNetFragment> _netFragments => _worlds.Active.NetFragments;
     private int _nextNetFragmentId { get => _worlds.Active.NextNetFragmentId; set => _worlds.Active.NextNetFragmentId = value; }
 
+    /// <summary>Whether the singleplayer opening fragment has been placed during this server session.</summary>
+    private bool _startNetFragmentPlaced;
+
     /// <summary>Net fragments on the active world (id/key/category/pos) for tests + inspection.</summary>
     public IReadOnlyList<(int Id, string Key, string Category, Vector3f Pos)> NetFragmentSnapshots
         => _netFragments.Select(f => (f.Id, f.Key, f.Category, f.Pos)).ToList();
@@ -64,6 +67,30 @@ public sealed partial class GameServer
         if (planet.Void)
         {
             return; // stations have no surface to scatter on
+        }
+
+        // The bundled solo/host launcher guarantees one authored opening clue near the first landing pad.
+        // Pack order is deliberate: the first still-unread fragment is the story's intended introduction.
+        // Put it opposite the start data cube (-14/+14 versus +14/+14), outside the pad but within sight.
+        if (_config.GuaranteeStartStoryFragment && !_startNetFragmentPlaced && _landingPads.Count > 0)
+        {
+            var intro = _story.Fragments.FirstOrDefault(f => !string.IsNullOrEmpty(f.Key)
+                                                             && !_storyState.FoundFragmentKeys.Contains(f.Key));
+            if (intro is not null)
+            {
+                int sx = WorldConstants.WrapX(_landingPads[0].CenterX - 14, _world.Circumference);
+                int sz = _landingPads[0].CenterZ + 14;
+                int sy = _generator.SurfaceHeight(planet, sx, sz);
+                _netFragments.Add(new ServerNetFragment
+                {
+                    Id = _nextNetFragmentId++,
+                    Pos = new Vector3f(sx + 0.5f, sy + 1f, sz + 0.5f),
+                    Key = intro.Key,
+                    Category = intro.Category,
+                    TextKey = intro.TextKey,
+                });
+                _startNetFragmentPlaced = true;
+            }
         }
 
         long fSeed = _meta.Seed ^ WorldGenerator.StableHash("netfragment:" + _world.LocationId);

@@ -1,0 +1,245 @@
+# Builds portable Windows and Linux playtests directly on GitHub. This is deliberately smaller than
+# release.yml: it produces self-contained artifacts, publishes no release and calls no hosted services.
+name: Voidcraft desktop playtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/voidcraft-playable
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voidcraft-playtest-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYTEST_VERSION: 0.1.0-playtest.${{ github.run_number }}
+
+jobs:
+  validate:
+    name: Validate game and story
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
+
+      - name: Validate story packs and locales
+        run: |
+          python3 tools/merge_story.py data/stories/vega_protocol
+          python3 tools/merge_story.py data/stories/voidcraft_awakening
+          python3 tools/locale_report.py --check
+
+      - name: Restore
+        run: |
+          dotnet restore tests/BlocksBeyondTheStars.Tests/BlocksBeyondTheStars.Tests.csproj
+          dotnet restore tests/BlocksBeyondTheStars.Client.Tests/BlocksBeyondTheStars.Client.Tests.csproj
+
+      - name: Build (warnings are errors)
+        run: |
+          dotnet build tests/BlocksBeyondTheStars.Tests/BlocksBeyondTheStars.Tests.csproj --no-restore -c Release -warnaserror
+          dotnet build tests/BlocksBeyondTheStars.Client.Tests/BlocksBeyondTheStars.Client.Tests.csproj --no-restore -c Release -warnaserror
+
+      - name: Test (fast tier)
+        run: |
+          dotnet test tests/BlocksBeyondTheStars.Tests/BlocksBeyondTheStars.Tests.csproj --no-build -c Release --filter "Category!=Slow" --logger "trx;LogFileName=server.trx" --results-directory TestResults
+          dotnet test tests/BlocksBeyondTheStars.Client.Tests/BlocksBeyondTheStars.Client.Tests.csproj --no-build -c Release --filter "Category!=Slow" --logger "trx;LogFileName=clientcore.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: Voidcraft-playtest-test-results-${{ github.run_number }}
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build-windows:
+    name: Build portable Windows game
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check Unity build credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=()
+          [ -n "$UNITY_LICENSE" ] || missing+=(UNITY_LICENSE)
+          [ -n "$UNITY_EMAIL" ] || missing+=(UNITY_EMAIL)
+          [ -n "$UNITY_PASSWORD" ] || missing+=(UNITY_PASSWORD)
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository Actions secrets: ${missing[*]}. See docs/developer/VOIDCRAFT_PLAYTEST.md."
+            exit 1
+          fi
+          echo "Unity build credentials are configured."
+
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      # StreamingAssets and Plugins are generated and gitignored. These steps make the player
+      # self-contained: shared game code, all content and a win-x64 local server for Singleplayer.
+      - name: Sync shared libraries and content
+        shell: pwsh
+        run: ./scripts/sync-client-libs.ps1
+
+      - name: Sync desktop updater libraries
+        shell: pwsh
+        run: ./scripts/sync-velopack-libs.ps1
+
+      - name: Publish bundled local server
+        shell: pwsh
+        run: ./scripts/publish-local-server.ps1 -Runtime win-x64 -Version ${{ env.PLAYTEST_VERSION }}
+
+      # The GameCI editor image is large. The preceding .NET work is complete, so remove unused
+      # preinstalled toolchains before Docker pulls the Unity image.
+      - name: Free disk space for Unity
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
+          df -h /
+
+      - name: Build Windows player
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: client
+          unityVersion: 6000.4.9f1
+          targetPlatform: StandaloneWindows64
+          buildMethod: BlocksBeyondTheStars.Client.EditorTools.BuildScript.BuildWindows
+          versioning: Custom
+          version: ${{ env.PLAYTEST_VERSION }}
+          customParameters: -buildOut /github/workspace/player
+          allowDirtyBuild: true
+
+      - name: Verify portable game contents
+        shell: bash
+        run: |
+          sudo chmod -R a+rwX player
+          test "$(cat player/version.txt)" = "$PLAYTEST_VERSION"
+          test -f player/BlocksBeyondTheStars.exe
+          test -f player/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer.exe
+          test -f player/BlocksBeyondTheStars_Data/StreamingAssets/data/stories/voidcraft_awakening/story.json
+          cp docs/user/START-HERE-WINDOWS.txt player/START-HERE.txt
+
+      - name: Upload playable Windows artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Voidcraft-Windows-Playtest-${{ github.run_number }}
+          path: player
+          if-no-files-found: error
+          retention-days: 30
+
+  build-linux:
+    name: Build portable Kubuntu/Linux game
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check Unity build credentials
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=()
+          [ -n "$UNITY_LICENSE" ] || missing+=(UNITY_LICENSE)
+          [ -n "$UNITY_EMAIL" ] || missing+=(UNITY_EMAIL)
+          [ -n "$UNITY_PASSWORD" ] || missing+=(UNITY_PASSWORD)
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository Actions secrets: ${missing[*]}. See docs/developer/VOIDCRAFT_PLAYTEST.md."
+            exit 1
+          fi
+          echo "Unity build credentials are configured."
+
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sync shared libraries and content
+        run: ./scripts/sync-client-libs.sh
+
+      - name: Sync desktop updater libraries
+        run: ./scripts/sync-velopack-libs.sh
+
+      - name: Publish bundled local server
+        run: ./scripts/publish-local-server.sh linux-x64 ${{ env.PLAYTEST_VERSION }}
+
+      - name: Free disk space for Unity
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
+          df -h /
+
+      - name: Build Linux player
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: client
+          unityVersion: 6000.4.9f1
+          targetPlatform: StandaloneLinux64
+          buildMethod: BlocksBeyondTheStars.Client.EditorTools.BuildScript.BuildLinux
+          versioning: Custom
+          version: ${{ env.PLAYTEST_VERSION }}
+          customParameters: -buildOut /github/workspace/player-linux
+          allowDirtyBuild: true
+
+      # GitHub's outer artifact ZIP does not preserve Unix executable bits. Keep the playable folder in a
+      # tarball so Kubuntu receives working player/server permissions after extraction.
+      - name: Verify and package portable game
+        shell: bash
+        run: |
+          sudo chmod -R a+rwX player-linux
+          sudo chmod +x player-linux/BlocksBeyondTheStars.x86_64
+          sudo chmod +x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
+          cp docs/user/START-HERE-LINUX.txt player-linux/START-HERE.txt
+          cp docs/user/Start-Voidcraft.sh player-linux/Start-Voidcraft.sh
+          chmod +x player-linux/Start-Voidcraft.sh
+
+          test "$(cat player-linux/version.txt)" = "$PLAYTEST_VERSION"
+          test -x player-linux/BlocksBeyondTheStars.x86_64
+          test -x player-linux/BlocksBeyondTheStars_Data/StreamingAssets/server/BlocksBeyondTheStars.GameServer
+          test -f player-linux/BlocksBeyondTheStars_Data/StreamingAssets/data/stories/voidcraft_awakening/story.json
+
+          mkdir linux-artifact
+          tar -C player-linux -czf "linux-artifact/Voidcraft-Kubuntu-Playtest-${GITHUB_RUN_NUMBER}.tar.gz" .
+          cp docs/user/START-HERE-LINUX.txt linux-artifact/READ-ME-FIRST.txt
+          tar -tzf "linux-artifact/Voidcraft-Kubuntu-Playtest-${GITHUB_RUN_NUMBER}.tar.gz" >/dev/null
+
+      - name: Upload playable Kubuntu/Linux artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Voidcraft-Kubuntu-Playtest-${{ github.run_number }}
+          path: linux-artifact
+          if-no-files-found: error
+          retention-days: 30

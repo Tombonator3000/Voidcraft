@@ -68,13 +68,13 @@ namespace BlocksBeyondTheStars.Client
     /// Loads the "What's new?" feed once per session: the committed <c>data/whatsnew.json</c> fetched
     /// raw from the repository's main branch (so the feed can be NEWER than the installed build —
     /// the interesting case next to the update notice #543), falling back to the copy bundled into
-    /// StreamingAssets by the data/ sync when offline. Presentation-only data, same trust model as
-    /// the rest of the bundled content.
+    /// StreamingAssets by the data/ sync when offline. Playtest builds deliberately use their bundled
+    /// copy: their branch can be ahead of main and must not display stale main-branch news.
     /// </summary>
     public static class WhatsNew
     {
         private const string OnlineUrl =
-            "https://raw.githubusercontent.com/marceld23/BlocksBeyondTheStars/main/data/whatsnew.json";
+            "https://raw.githubusercontent.com/Tombonator3000/Voidcraft/main/data/whatsnew.json";
 
         /// <summary>Loaded entries, newest first; null while no load has finished yet. An empty list
         /// means both the online fetch and the bundled fallback came up dry.</summary>
@@ -101,19 +101,23 @@ namespace BlocksBeyondTheStars.Client
 
         private static IEnumerator Fetch()
         {
-            using (var req = UnityWebRequest.Get(OnlineUrl))
+            bool playtest = Application.version.IndexOf("playtest", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!playtest)
             {
-                req.timeout = 8;
-                yield return req.SendWebRequest();
-                if (req.result == UnityWebRequest.Result.Success && TryParse(req.downloadHandler.text))
+                using (var req = UnityWebRequest.Get(OnlineUrl))
                 {
-                    yield break;
+                    req.timeout = 8;
+                    yield return req.SendWebRequest();
+                    if (req.result == UnityWebRequest.Result.Success && TryParse(req.downloadHandler.text))
+                    {
+                        yield break;
+                    }
                 }
             }
 
-            // Offline / rate-limited / malformed: fall back to the copy bundled with this build. By the
+            // Playtest / offline / rate-limited / malformed: use the copy bundled with this build. By the
             // time the menu is up the StreamingAssets cache is ready on WebGL too, so plain File IO works.
-            FromBundled = true;
+            FromBundled = !playtest;
             try
             {
                 string path = Path.Combine(StreamingAssetsCache.DataDir, "whatsnew.json");

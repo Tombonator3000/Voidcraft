@@ -179,6 +179,9 @@ namespace BlocksBeyondTheStars.Client
             // Solo/host convenience: guarantee a data cube next to the start landing pad (only this bundled
             // launcher sets it; dedicated/shared servers use the normal random scatter).
             const string startCubeArg = " --guarantee-start-cube true";
+            // Put the active story pack's first unread clue a short walk from the starting pad. This makes
+            // the opening story discoverable in solo/host games without changing dedicated-world density.
+            const string startFragmentArg = " --guarantee-start-fragment true";
             // Admin cheat commands (/tp, /give, /fly …) work out of the box on the bundled host: the solo
             // player is the WorldAdmin, and on a friend-hosted world guests are still blocked by the admin
             // role. Dedicated servers keep the off default (#642 — /tp never worked in singleplayer).
@@ -217,7 +220,7 @@ namespace BlocksBeyondTheStars.Client
             {
                 FileName = exe,
                 Arguments = $"--port {Port} --name \"{serverName}\" --world \"{worldName}\" " +
-                            $"--max-players {Mathf.Max(1, maxPlayers)} --saves \"{saves}\" --data \"{data}\" --usercontent \"{userContent}\" --stdin-stop true" + viewArg + seedArg + spaceArgs + voiceArg + startCubeArg + cheatsArg + noConfigArg + creativeArgs + optionArgs + hostArgs,
+                            $"--max-players {Mathf.Max(1, maxPlayers)} --saves \"{saves}\" --data \"{data}\" --usercontent \"{userContent}\" --stdin-stop true" + viewArg + seedArg + spaceArgs + voiceArg + startCubeArg + startFragmentArg + cheatsArg + noConfigArg + creativeArgs + optionArgs + hostArgs,
                 WorkingDirectory = Path.GetDirectoryName(exe),
                 UseShellExecute = false,
                 CreateNoWindow = true,

@@ -1,6 +1,7 @@
 # Developer documentation — index
 
-Engineering and design documentation for **Blocks Beyond the Stars**. Player-facing operation lives in
+Engineering and design documentation for **Voidcraft**, built on the Blocks Beyond the Stars foundation.
+Player-facing operation lives in
 [../user/USER_MANUAL.md](../user/USER_MANUAL.md); the live Done/Open status is [../../TODO.md](../../TODO.md);
 the hard contributor rules are in [../../AGENTS.md](../../AGENTS.md); the project strategy
 (vision · mission · roadmap) is in [../strategy/](../strategy/vision.md).
@@ -15,6 +16,8 @@ refreshed 2026-08-08.
   solution & project graph, runtime, networking, persistence, and a where-to-find-what map. **Read this first.**
 - [DEVELOPER.md](DEVELOPER.md) — build, test and build-verification guide (the `build-client.ps1`/`build-client.sh`
   pipeline, freshness checks, "works in the Editor, broken in the build" pitfalls).
+- [VOIDCRAFT_PLAYTEST.md](VOIDCRAFT_PLAYTEST.md) — one-time GitHub/GameCI setup and the portable Windows
+  playtest build/download workflow for this fork.
 - [LINUX_PORT.md](LINUX_PORT.md) — how the Linux port works: cross-platform changes, the console launcher,
   bash build scripts, CI/CD and known limitations.
 - [MACOS_BUILD.md](MACOS_BUILD.md) — the experimental macOS build: `StandaloneOSX` cross-built on Linux (Mono),
@@ -73,6 +76,8 @@ refreshed 2026-08-08.
 
 ## Story & content
 
+- [VOIDCRAFT_FOUNDATION.md](VOIDCRAFT_FOUNDATION.md) — Voidcraft's pitch, first story slice, canon,
+  technical reuse boundaries and next playable milestone.
 - [STORY_IMPLEMENTATION.md](STORY_IMPLEMENTATION.md) — the story engine/mechanics (beats, triggers, finale).
 - [STORY_VEGA_PROTOCOL_CONCEPT.md](STORY_VEGA_PROTOCOL_CONCEPT.md) — the story's design rationale.
 - [LORE_STRUCTURE.md](LORE_STRUCTURE.md) — the lore bible + content schema.

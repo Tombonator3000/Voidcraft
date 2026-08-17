@@ -1,4 +1,4 @@
-# Blocks Beyond the Stars — Project Status
+# Voidcraft — Project Status
 
 The single source of truth for **what is built** and **what is still open**. Design notes and deep
 plans live under [docs/](docs/) (committed); the long-range direction is the strategy trio in
@@ -20,6 +20,48 @@ Claude `Co-Authored-By` trailer; OpenAI texture + ElevenLabs sound generation is
 Architecture: Unity 6 (URP since 2026-06-10) client + authoritative .NET 10 server, everything built in
 code (no scene authoring). One shared world; MessagePack networking for native clients plus a WebGL JSON
 envelope at the WebSocket edge; deterministic seed world-gen; SQLite default persistence with opt-in PostgreSQL.
+
+---
+
+## Voidcraft foundation
+
+First identity/story slice on branch `feat/voidcraft-foundation` (2026-08-07), with GitHub playtest delivery
+on `feat/voidcraft-playable` (2026-08-12), built on the AGPL-licensed Blocks Beyond the Stars foundation.
+Design and scope: [Voidcraft foundation](docs/developer/VOIDCRAFT_FOUNDATION.md).
+
+**Done**
+
+- Player-facing title and desktop product metadata changed to **Voidcraft** while technical executable,
+  namespace and Unity data-folder names remain unchanged.
+- New default story pack `voidcraft_awakening` (**The Sleeper Signal**): 13 beats, 6 fragments, 4 memories,
+  5 NPC flavour lines and a 4-node finale argument, authored in complete EN+DE locales.
+- Fresh-world prologue/intro reframed around an erased ship log and a subsurface signal; original
+  `vega_protocol` remains installed and `none` remains available for sandbox play.
+- Finale reveal/resolution and contextual insight lines moved out of VEGA-specific server constants and into
+  story-pack data; story validation now covers every referenced story locale key.
+- Registry, loader and server-story tests updated for the new default and multi-pack compatibility.
+- Fork-facing update/news/contribution links now target `Tombonator3000/Voidcraft`; the upstream Official
+  Worlds service is disabled by default while explicit self-hosted WorldHost URLs remain supported.
+- Fork-specific `voidcraft-playtest.yml` validates the fast .NET tier and produces a portable Windows player
+  plus a permission-preserving Kubuntu/Linux tarball, each with its platform-native bundled local server.
+  Setup/download instructions and in-archive start guides are committed.
+- The first GitHub run compiled with zero warnings and exposed a story-locale test false positive: legitimate
+  bracket-led recovered-log prose is now checked with `Localizer.Has` instead of mistaken for `[missing.key]`.
+- Bundled Singleplayer/Host now places the active story pack's first unread fragment roughly 20 blocks from
+  the starting pad. In Voidcraft this is the recovered VEGA ship trace and immediately unlocks **The signal
+  below**; dedicated servers retain the rarer world-seeded scatter.
+
+**Open before a public Voidcraft build**
+
+- Expand the guaranteed opening signal shard into a full terrain/structure **Signal Scar** encounter, then
+  tune the first 30 minutes through playtests.
+- Add a visible three-way world-creation selector (Sleeper Signal / VEGA Protocol / sandbox).
+- Create a distinct logo, menu imagery, Anchor geometry/audio and Voidcraft screenshots.
+- Smoke-test the first Kubuntu artifact on physical hardware, including launching Singleplayer and recovering
+  the nearby opening signal. See [Voidcraft GitHub playtest](docs/developer/VOIDCRAFT_PLAYTEST.md).
+- Create fork-owned hosted-world/release infrastructure before enabling those public services.
+- Run the full .NET and Unity suites in a dependency-complete build environment, then package signed release
+  clients. The playtest workflow intentionally runs the non-Slow .NET tier and produces an unsigned artifact.
 
 ---
 

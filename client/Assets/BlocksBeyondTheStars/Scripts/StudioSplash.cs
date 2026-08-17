@@ -9,7 +9,7 @@ namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// Developer-studio splash — shown for ~5 s right after the mandatory "Made with Unity" screen and
-    /// before the game's own BLOCKS BEYOND THE STARS title splash. A dark stage with an assembling block-cluster emblem
+    /// before the game's own VOIDCRAFT title splash. A dark stage with an assembling block-cluster emblem
     /// inside a sweeping orbit ring (a little rocket circling it + twinkling stars), the gradient "JuMaVe
     /// Games" wordmark (Ju=cyan · Ma=white · Ve=orange) and the slogan "Built from imagination.". A
     /// whoosh→tada sting lands on the reveal flash. Code-built uGUI on its own overlay canvas; driven from

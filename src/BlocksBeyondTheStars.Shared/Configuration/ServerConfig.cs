@@ -256,6 +256,13 @@ public sealed class ServerConfig
     /// </summary>
     public bool GuaranteeStartDataCube { get; set; }
 
+    /// <summary>
+    /// Singleplayer story onboarding: guarantee the active pack's first still-unread fragment a short walk
+    /// from the start landing pad. Set only by the bundled singleplayer/host launcher; dedicated servers keep
+    /// the normal rare, world-seeded fragment scatter.
+    /// </summary>
+    public bool GuaranteeStartStoryFragment { get; set; }
+
     // --- Singleplayer "Creative" world options (the player picks these at world creation). They are a
     // head-start sandbox: everything available + a starter set, while survival mechanics stay ON. Default
     // false = the normal "Explorer" experience. Persisted per world in WorldMetadata so they reapply on load. ---
@@ -487,6 +494,9 @@ public sealed class ServerConfig
                     break;
                 case "guarantee-start-cube":
                     if (bool.TryParse(value, out var gsc)) { GuaranteeStartDataCube = gsc; applied.Add("guarantee-start-cube"); }
+                    break;
+                case "guarantee-start-fragment":
+                    if (bool.TryParse(value, out var gsf)) { GuaranteeStartStoryFragment = gsf; applied.Add("guarantee-start-fragment"); }
                     break;
 
                 // --- World options (creation-time; the server bakes them into the save's metadata) ---
