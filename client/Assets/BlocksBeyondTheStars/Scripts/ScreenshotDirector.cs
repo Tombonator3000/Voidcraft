@@ -22,8 +22,8 @@ namespace BlocksBeyondTheStars.Client
     /// ONE language per run (set with <c>-lang de|en</c>): the in-game HUD language is fixed when the world
     /// starts (WorldRig sets <c>boot.Locale</c> from <c>Settings.Language</c>), so a clean DE/EN set is two runs.
     ///
-    /// Poses are reached with ordinary gameplay intents (SendExitShip / SendEnterShip / SendEnterSpace /
-    /// SendShipMove) — no admin/cheat commands. Capture reuses the proven full-frame recipe
+    /// Flight uses ordinary gameplay intents; outdoor comparisons use scripted player poses and visual
+    /// time overrides. These are rendered visual evidence, not proof of a new-player gameplay journey. Capture reuses the proven full-frame recipe
     /// (<see cref="ScreenCapture.CaptureScreenshotAsTexture"/>, which includes the ScreenSpaceOverlay HUD,
     /// like the /bump screenshot). The timings and the three flight framings are the parts most likely to
     /// need tuning on a real run — adjust the constants below.
@@ -47,7 +47,12 @@ namespace BlocksBeyondTheStars.Client
         private string _outDir;
         private bool _headless; // true = launched via the -captureShots command line (exit the process when done)
         private string _planet; // when set (-planet <key>), capture ONLY that planet's surface (surface_<key>.png)
+        private string _startPlanet; // optional -startPlanet selects the world for the full concept sequence
+        private bool _concepts; // additional actual-player material/site views, with scripted pose setup
         private bool _credits;  // when true (-captureCredits), capture ONLY the credits screen (credits.png) and quit
+        private JourneyInputSource _input;
+        private int _failedViews;
+        private bool _quitting;
 
         /// <summary>Self-install at startup when capture is requested. Reload-safe: reads config fresh from the
         /// command line (player/headless) or EditorPrefs (editor menu) rather than relying on static state.</summary>
@@ -59,6 +64,9 @@ namespace BlocksBeyondTheStars.Client
                 return;
             }
 
+            // Command-line captures must progress even when another desktop window has focus.
+            // Keep ordinary gameplay and the editor menu's capture setting unchanged.
+            if (headless) Application.runInBackground = true;
             var go = new GameObject("ScreenshotDirector");
             DontDestroyOnLoad(go);
             var d = go.AddComponent<ScreenshotDirector>();
@@ -68,6 +76,11 @@ namespace BlocksBeyondTheStars.Client
             d._headless = headless;
             d._planet = planet;
             d._credits = credits;
+            d._concepts = Array.Exists(Environment.GetCommandLineArgs(),
+                a => string.Equals(a, "-captureConcepts", StringComparison.OrdinalIgnoreCase));
+            var args = Environment.GetCommandLineArgs();
+            for (int i = 0; i + 1 < args.Length; i++)
+                if (string.Equals(args[i], "-startPlanet", StringComparison.OrdinalIgnoreCase)) d._startPlanet = args[i + 1];
         }
 
         private static bool CaptureRequested(out string lang, out string outDir, out long seed, out bool headless, out string planet, out bool credits)
@@ -127,9 +140,42 @@ namespace BlocksBeyondTheStars.Client
 
         private void Start() => StartCoroutine(Run());
 
+        private void Update()
+        {
+            if (_input == null || _quitting) return;
+            if (!InputMap.OwnsVerificationInput(_input))
+            {
+                Debug.LogError("[Capture] Exclusive gameplay input ownership was lost.");
+                StopAllCoroutines();
+                Quit(3);
+                return;
+            }
+            _input.Publish(default);
+            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.JoystickButton1))
+            {
+                Debug.LogWarning("[Capture] Canceled through native Escape/controller cancel.");
+                StopAllCoroutines();
+                Quit(3);
+            }
+        }
+
+        private void OnDisable()
+        {
+            _input?.Clear();
+            if (_input != null) InputMap.DetachVerificationInput(_input);
+        }
+
         private IEnumerator Run()
         {
-            Screen.SetResolution(ShotWidth, ShotHeight, false);
+            _input = new JourneyInputSource();
+            if (!InputMap.AttachCaptureInput(_input))
+            {
+                Debug.LogError("[Capture] Could not acquire exclusive gameplay input.");
+                Quit(3);
+                yield break;
+            }
+            _input.Publish(default);
+            Screen.SetResolution(ShotWidth, ShotHeight, FullScreenMode.FullScreenWindow);
 
             var shell = FindAnyObjectByType<AppShell>();
             if (shell == null)
@@ -145,7 +191,8 @@ namespace BlocksBeyondTheStars.Client
 
             string dir = ResolveOutDir();
             Directory.CreateDirectory(dir);
-            Debug.Log($"[Capture] lang={_lang} seed={_seed} planet={_planet ?? "(none)"} credits={_credits} out={dir}");
+            Debug.Log($"[Capture] lang={_lang} seed={_seed} planet={_planet ?? "(none)"} credits={_credits} out={dir} "
+                + $"runInBackground={Application.runInBackground} focused={Application.isFocused}");
 
             // Credits-only mode (-captureCredits): from the main menu, open the credits screen, let it build,
             // capture it, and quit. Used to verify the credits layout without a full marketing run.
@@ -197,7 +244,8 @@ namespace BlocksBeyondTheStars.Client
             // Survival), so no "Taking damage!" warning or attack fx can land in a frame — the HUD itself
             // (bars, minimap, hotbar) looks the same as in Survival.
             shell.StartSingleplayerWorld(WorldName, _seed, creativeUnlockAll: true, creativeAllShips: true, creativeKit: true,
-                sandbox: true);
+                sandbox: true, worldOptions: string.IsNullOrEmpty(_startPlanet) ? null
+                    : new WorldCreationOptions { StartPlanetType = _startPlanet });
 
             yield return WaitForPhase(shell, ShellPhase.InGame, WorldLoadTimeout);
             var boot = shell.CurrentBoot;
@@ -232,6 +280,8 @@ namespace BlocksBeyondTheStars.Client
                 yield return Capture(Path.Combine(dir, "cockpit_menu.png"));
                 menu.SetMenuOpen(false);
             }
+
+            if (_concepts) yield return CaptureHomeViews(boot, dir);
 
             // 4) Space flight — take off while still cleanly ABOARD (right after spawn, BEFORE stepping outside).
             //    Stepping out of the hull clears the server's aboard state, after which EnterSpace is refused and
@@ -275,7 +325,7 @@ namespace BlocksBeyondTheStars.Client
                 {
                     if (!placed)
                     {
-                        placed = pc.PlaceForCaptureNear(anchor, pitch: 4f);
+                        placed = pc.PlaceForCaptureNear(anchor, pitch: 18f);
                     }
 
                     bool alive = !boot.AwaitingRespawnConfirm && boot.Health > 0f;
@@ -304,8 +354,199 @@ namespace BlocksBeyondTheStars.Client
             yield return new WaitForSecondsRealtime(PoseSettle);
             yield return Capture(Path.Combine(dir, "planet_surface.png"));
 
+            if (_concepts) yield return CaptureConceptViews(boot, dir);
             Debug.Log("[Capture] Done.");
             Quit(0);
+        }
+
+        /// <summary>Actual rendered concept comparisons. Camera placement is scripted and does not
+        /// demonstrate player navigation or quest completion. Missing safe views are logged, not fabricated.</summary>
+        private IEnumerator CaptureHomeViews(GameBootstrap boot, string dir)
+        {
+            var pc = FindAnyObjectByType<PlayerController>();
+            if (pc == null || pc.Camera == null) yield break;
+            yield return WaitUntil(() => !boot.CinematicCameraActive && !boot.VegaPrologueActive, 120f);
+            if (boot.CinematicCameraActive || boot.VegaPrologueActive)
+            {
+                Debug.LogWarning("[Capture] Home views unavailable: cinematic still owns the camera.");
+                _failedViews++;
+                yield break;
+            }
+            LandedShipModel home = null;
+            foreach (var ship in boot.LandedShips.Values)
+                if (ship.OwnerId == boot.LocalPlayerId) { home = ship; break; }
+            if (home == null) yield break;
+            Vector3 saved = pc.transform.position;
+            float savedYaw = pc.transform.eulerAngles.y;
+            float savedPitch = Mathf.DeltaAngle(0f, pc.Camera.transform.localEulerAngles.x);
+            for (int view = 0; view < 2; view++)
+            {
+                int x = home.Width / 2, z = view == 0 ? 1 : home.Length - 3;
+                var floor = new BlocksBeyondTheStars.Shared.Geometry.Vector3i(x, 0, z);
+                if (z <= 0 || home.Get(floor).IsAir
+                    || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 1, 0)).IsAir
+                    || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 2, 0)).IsAir)
+                {
+                    Debug.LogWarning($"[Capture] Home view {view} unavailable: observed aisle is occupied.");
+                    _failedViews++;
+                    continue;
+                }
+                Vector3 feet = boot.ScenePos(home.Origin.X + x + 0.5f, home.Origin.Y + 1.15f,
+                    home.Origin.Z + z + 0.5f);
+                pc.SetCapturePose(feet, view == 0 ? 0f : 180f, 4f);
+                yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
+                if (!pc.IsCaptureGrounded)
+                {
+                    Debug.LogWarning($"[Capture] Home view {view} unavailable: no grounded capsule at {pc.transform.position} (requested {feet}).");
+                    _failedViews++;
+                    continue;
+                }
+                yield return new WaitForSecondsRealtime(PoseSettle);
+                yield return Capture(Path.Combine(dir, view == 0 ? "ship_home_forward.png" : "ship_home_aft.png"));
+            }
+            pc.SetCapturePose(saved, savedYaw, savedPitch);
+            yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
+        }
+
+        private IEnumerator CaptureConceptViews(GameBootstrap boot, string dir)
+        {
+            var pc = FindAnyObjectByType<PlayerController>();
+            if (pc == null || pc.Camera == null) yield break;
+            pc.SetLookAngles(pc.transform.eulerAngles.y, 32f);
+            yield return new WaitForSecondsRealtime(PoseSettle);
+            yield return Capture(Path.Combine(dir, "terrain_materials.png"));
+
+            var site = Array.Find(boot.PlanetPois, p => p.Type == "veyl_signal");
+            if (site == null)
+            {
+                Debug.LogWarning("[Capture] Veyl view unavailable: no uncompleted site on this world.");
+                _failedViews++;
+                yield break;
+            }
+            var stage = new Vector3(boot.SceneX(site.X) - 15f, boot.PlayerPosition.y,
+                boot.SceneZ(site.Z) - 15f);
+            bool found = false;
+            Vector3 ground = stage;
+            float elapsed = 0f;
+            // Keep the player near the previous ground altitude so the server's player-relative vertical
+            // streaming band includes the new ground. The downward ray, not the body, starts 48 m higher.
+            // If the terrain is much lower, lower the streaming request in bounded steps; a real floor
+            // collider and dry grounded state must still be observed before any image is accepted.
+            while (elapsed < 60f)
+            {
+                Vector3 streamPose = stage - Vector3.up * (16f * Mathf.Min(4, Mathf.FloorToInt(elapsed / 12f)));
+                pc.SetCapturePose(streamPose, 45f, 8f);
+                if (TryCaptureFloor(pc, streamPose + Vector3.up * 48f, 140f, out var hit))
+                {
+                    ground = hit.point + Vector3.up * 0.15f;
+                    found = true;
+                    Debug.Log($"[Capture] Veyl ground={ground} streamPose={streamPose} elapsed={elapsed:F2} "
+                        + $"pendingMeshes={boot.PendingMeshCount} cinematic={boot.CinematicCameraActive}");
+                    break;
+                }
+                elapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            if (!found)
+            {
+                Debug.LogWarning("[Capture] Veyl view unavailable: no streamed safe ground at the approach.");
+                _failedViews++;
+                yield break;
+            }
+            pc.SetCapturePose(ground, 45f, 8f);
+            yield return WaitUntil(() => pc.IsCaptureGrounded, 12f);
+            if (!pc.IsCaptureGrounded || pc.IsHeadUnderwater() || boot.Health <= 0f)
+            {
+                Debug.LogWarning("[Capture] Veyl view skipped: player did not settle alive on dry ground.");
+                _failedViews++;
+                yield break;
+            }
+            boot.SetCaptureEnvironment(0.38f);
+            yield return new WaitForSecondsRealtime(ChunkSettle);
+            pc.SetLookAngles(45f, 8f);
+            yield return Capture(Path.Combine(dir, "veyl_approach.png"));
+            File.WriteAllText(Path.Combine(dir, "concept-view-context.txt"),
+                "Actual Unity player rendering; scripted pose/visual-time setup, not a player journey.\n"
+                + $"Veyl target {site.X}, {site.Z}; player {boot.PlayerPosition}; image {Screen.width}x{Screen.height}.\n");
+            yield return CaptureVaultInterior(boot, pc, site.X, site.Z, ground.y, dir);
+        }
+
+        private IEnumerator CaptureVaultInterior(GameBootstrap boot, PlayerController pc,
+            float siteX, float siteZ, float surfaceY, string dir)
+        {
+            // Discover the real descending staircase from replicated shapes. This is scripted capture
+            // placement, never a navigation test; no generator origin or guessed chamber floor is used.
+            int cx = Mathf.FloorToInt(boot.SceneX(siteX)), cz = Mathf.FloorToInt(boot.SceneZ(siteZ));
+            Vector3Int stair = default;
+            int highest = int.MinValue;
+            bool IsStair(Vector3Int cell) => boot.World.TryGetBlock(cell.x, cell.y, cell.z, out var block)
+                && !block.IsAir && BlocksBeyondTheStars.Shared.World.ShapeCode.ShapeOf(
+                    boot.World.GetShape(cell.x, cell.y, cell.z)) == (int)BlocksBeyondTheStars.Shared.World.BlockShape.Stairs;
+            for (int x = cx - 10; x <= cx + 10; x++)
+            for (int z = cz - 10; z <= cz + 10; z++)
+            for (int y = Mathf.FloorToInt(surfaceY) - 10; y <= Mathf.FloorToInt(surfaceY) + 6; y++)
+            {
+                var cell = new Vector3Int(x, y, z);
+                if (y < highest || !IsStair(cell)) continue;
+                // Prefer the middle of a row with at least three stair cells.
+                bool center = IsStair(cell + Vector3Int.left) && IsStair(cell + Vector3Int.right);
+                if (y > highest || center) { stair = cell; highest = y; }
+            }
+            int rows = 0;
+            Vector3Int direction = default;
+            var steps = new[] { Vector3Int.forward, Vector3Int.back, Vector3Int.left, Vector3Int.right };
+            while (highest != int.MinValue && rows < 32)
+            {
+                bool lower = false;
+                foreach (var step in steps)
+                {
+                    var next = stair + step + Vector3Int.down;
+                    if (!IsStair(next)) continue;
+                    stair = next; direction = step; rows++; lower = true; break;
+                }
+                if (!lower) break;
+            }
+            if (rows < 16)
+            {
+                Debug.LogWarning($"[Capture] Vault interior unavailable: only {rows} descending rows observed.");
+                _failedViews++;
+                yield break;
+            }
+            Vector3 candidate = (Vector3)stair + (Vector3)direction * 5f + new Vector3(0.5f, 0.15f, 0.5f);
+            if (!TryCaptureFloor(pc, candidate + Vector3.up * 2f, 3f, out var hit))
+            {
+                Debug.LogWarning("[Capture] Vault interior unavailable: no observed floor collider at the landing.");
+                _failedViews++;
+                yield break;
+            }
+            float yaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+            pc.SetCapturePose(hit.point + Vector3.up * 0.15f, yaw, -10f);
+            yield return WaitUntil(() => pc.IsCaptureGrounded, 12f);
+            if (!pc.IsCaptureGrounded || pc.IsHeadUnderwater())
+            {
+                Debug.LogWarning($"[Capture] Vault interior unavailable: grounded={pc.IsCaptureGrounded}, "
+                    + $"pendingMeshes={boot.PendingMeshCount}.");
+                _failedViews++;
+                yield break;
+            }
+            yield return new WaitForSecondsRealtime(PoseSettle);
+            yield return Capture(Path.Combine(dir, "veyl_vault.png"));
+        }
+
+        private static bool TryCaptureFloor(PlayerController pc, Vector3 origin, float distance, out RaycastHit floor)
+        {
+            floor = default;
+            float nearest = float.PositiveInfinity;
+            // A ray from above the held setup pose hits the player's capsule first. Inspect all hits;
+            // rejecting only that first hit would never reach an already streamed floor underneath it.
+            foreach (var hit in Physics.RaycastAll(origin, Vector3.down, distance, ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider.transform == pc.transform || hit.collider.transform.IsChildOf(pc.transform)
+                    || hit.normal.y < 0.7f || hit.distance >= nearest) continue;
+                floor = hit;
+                nearest = hit.distance;
+            }
+            return !float.IsPositiveInfinity(nearest);
         }
 
         /// <summary>Surface-only capture for one forced planet type (<c>-planet &lt;key&gt;</c>): start a fresh world
@@ -387,7 +628,7 @@ namespace BlocksBeyondTheStars.Client
                 // the player so gravity can settle it and isGrounded can latch.
                 if (!placed)
                 {
-                    placed = pc.PlaceForCaptureNear(anchor, pitch: 4f);
+                    placed = pc.PlaceForCaptureNear(anchor, pitch: 18f);
                 }
 
                 bool alive = !boot.AwaitingRespawnConfirm && boot.Health > 0f;
@@ -436,6 +677,47 @@ namespace BlocksBeyondTheStars.Client
 
         private IEnumerator Capture(string path)
         {
+            var boot = FindAnyObjectByType<GameBootstrap>();
+            if (_concepts && boot != null && !boot.InSpace)
+            {
+                // Give the actual streamed world a quiet interval before assessing missing forms or
+                // materials. A timeout is an unavailable view, never an apparently completed capture.
+                float started = Time.realtimeSinceStartup, quietSince = -1f, nextRecord = 0f;
+                int epoch = boot.WorldEpoch;
+                var evidence = new System.Text.StringBuilder();
+                bool ready = false;
+                while (Time.realtimeSinceStartup - started < 120f)
+                {
+                    float now = Time.realtimeSinceStartup;
+                    bool quiet = boot.WorldReady && boot.World != null && boot.World.Chunks.Count > 0 && boot.PendingMeshCount == 0
+                        && boot.ChunkMeshFailureCount == 0 && boot.TimeSinceLastChunk >= 0.6f
+                        && !boot.CinematicCameraActive && !boot.VegaPrologueActive
+                        && InputMap.OwnsVerificationInput(_input);
+                    if (boot.WorldEpoch != epoch) { quietSince = -1f; epoch = boot.WorldEpoch; }
+                    if (!quiet) quietSince = -1f;
+                    else if (quietSince < 0f) quietSince = now;
+                    ready = quietSince >= 0f && now - quietSince >= 1.5f;
+                    if (now - started >= nextRecord || ready)
+                    {
+                        evidence.AppendLine($"elapsed={now - started:F2} pending={boot.PendingMeshCount} "
+                            + $"dirty={boot.DirtyChunkCount} building={boot.MeshBuildsInFlight} uploading={boot.PendingMeshUploads} "
+                            + $"baking={boot.ColliderBakesInFlight} assigning={boot.PendingColliderAssignments} "
+                            + $"failures={boot.ChunkMeshFailureCount} epoch={epoch} ready={ready} "
+                            + $"player={boot.PlayerPosition} cinematic={boot.CinematicCameraActive} prologue={boot.VegaPrologueActive}");
+                        nextRecord = now - started + 1f;
+                    }
+                    if (ready) break;
+                    yield return null;
+                }
+                evidence.AppendLine($"passed={ready}; scripted pose and visual environment; not a gameplay journey.");
+                File.WriteAllText(Path.ChangeExtension(path, ".readiness.txt"), evidence.ToString());
+                if (!ready)
+                {
+                    _failedViews++;
+                    Debug.LogWarning($"[Capture] Skipped {path}: scene did not settle before the capture deadline.");
+                    yield break;
+                }
+            }
             // Never catch the VEGA onboarding/greeting dialog in a frame — a fresh world queues her intro
             // lines right at spawn. (No-op on the menu, where no panel exists yet.)
             FindAnyObjectByType<VegaPanel>()?.DismissSpeechForCapture();
@@ -451,10 +733,12 @@ namespace BlocksBeyondTheStars.Client
             {
                 tex = ScreenCapture.CaptureScreenshotAsTexture(); // full composited frame, incl. the overlay HUD
                 File.WriteAllBytes(path, tex.EncodeToPNG());
+                if (_concepts) WriteVoxelProbe(path);
                 Debug.Log($"[Capture] wrote {path}");
             }
             catch (Exception e)
             {
+                _failedViews++;
                 Debug.LogWarning($"[Capture] failed {path}: {e.Message}");
             }
             finally
@@ -464,6 +748,39 @@ namespace BlocksBeyondTheStars.Client
                     Destroy(tex);
                 }
             }
+        }
+
+        private static void WriteVoxelProbe(string imagePath)
+        {
+            var boot = FindAnyObjectByType<GameBootstrap>();
+            var pc = FindAnyObjectByType<PlayerController>();
+            if (boot?.World == null || boot.Content == null || pc?.Camera == null) return;
+            var report = new System.Text.StringBuilder();
+            report.AppendLine("Read-only first occupied voxel per viewport ray; cutout alpha and fixture meshes are not resolved.");
+            report.AppendLine($"Camera={pc.Camera.transform.position} forward={pc.Camera.transform.forward} seed={boot.WorldSeed}");
+            report.AppendLine($"Mesh pipeline pending={boot.PendingMeshCount}: dirty={boot.DirtyChunkCount}, "
+                + $"building={boot.MeshBuildsInFlight}, uploading={boot.PendingMeshUploads}, "
+                + $"baking={boot.ColliderBakesInFlight}, assigning={boot.PendingColliderAssignments}, "
+                + $"failures={boot.ChunkMeshFailureCount}. Voxel data can precede its visible mesh.");
+            foreach (float sy in new[] { 0.3f, 0.5f, 0.7f })
+                foreach (float sx in new[] { 0.25f, 0.5f, 0.75f })
+                {
+                    var ray = pc.Camera.ViewportPointToRay(new Vector3(sx, sy, 0));
+                    bool found = false;
+                    for (float distance = 0.2f; distance <= 40f; distance += 0.1f)
+                    {
+                        var p = ray.GetPoint(distance);
+                        int x = Mathf.FloorToInt(p.x), y = Mathf.FloorToInt(p.y), z = Mathf.FloorToInt(p.z);
+                        var id = boot.World.GetBlock(x, y, z);
+                        if (id.IsAir) id = boot.LandedShipBlockAt(x, y, z, out _, out _);
+                        if (id.IsAir) continue;
+                        report.AppendLine($"viewport={sx},{sy} cell={x},{y},{z} block={boot.Content.BlockById(id)?.Key} distance={distance:F1}");
+                        found = true;
+                        break;
+                    }
+                    if (!found) report.AppendLine($"viewport={sx},{sy} no occupied voxel within 40 m");
+                }
+            File.WriteAllText(Path.ChangeExtension(imagePath, ".voxel-probe.txt"), report.ToString());
         }
 
         private static IEnumerator WaitForPhase(AppShell shell, ShellPhase phase, float timeout)
@@ -488,6 +805,9 @@ namespace BlocksBeyondTheStars.Client
 
         private void Quit(int code)
         {
+            _quitting = true;
+            if (code == 0 && _failedViews > 0) code = 2;
+            OnDisable();
 #if UNITY_EDITOR
             if (_headless)
             {

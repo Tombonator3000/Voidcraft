@@ -1107,60 +1107,51 @@ namespace BlocksBeyondTheStars.Client
             return true;
         }
 
-        /// <summary>Scans the nearest creature (threat assessment) or, failing that, the block in view.</summary>
+        /// <summary>Scan the nearest aimed surface or lifeform. Off-axis wildlife must not steal a
+        /// deliberate inscription scan; fluids remain targetable even without physics colliders.</summary>
         private void ScanTarget()
         {
-            if (Game?.Network == null || Camera == null)
-            {
-                return;
-            }
+            if (Game?.Network == null || !TryGetScanTarget(out string kind, out string key, out var at)) return;
+            Game.Network.SendScan(kind, key);
+            Weapons?.Pulse(at, new Color(0.4f, 0.85f, 1f));
+        }
 
-            string speciesId = null;
-            Vector3 scanPos = default;
-            float bestSq = Reach * Reach;
-            foreach (var c in Game.Creatures)
+        /// <summary>Read-only target query shared by ordinary scanner input and aiming verification.
+        /// This selects presentation intent only; the server still validates every scan and reward.</summary>
+        public bool TryGetScanTarget(out string kind, out string key, out Vector3 at)
+        {
+            kind = key = null;
+            at = default;
+            if (Game?.World == null || Camera == null) return false;
+            var ray = new Ray(Camera.transform.position, Camera.transform.forward);
+            float best = Reach;
+            if (AimBlockHit(out var cell, out _, out float blockDistance, includeFluids: true))
             {
-                var cp = Game.ScenePos(c.X, c.Y, c.Z); // seam-aware (longitude wraps)
-                float d = (cp - transform.position).sqrMagnitude;
-                if (d < bestSq)
+                best = blockDistance;
+                var definition = Game.Content?.BlockById(Game.World.GetBlock(cell.x, cell.y, cell.z));
+                if (definition != null)
                 {
-                    bestSq = d;
-                    speciesId = c.SpeciesId;
-                    scanPos = cp;
+                    kind = "block"; key = definition.Key;
+                    at = (Vector3)cell + Vector3.one * 0.5f;
                 }
             }
-
-            if (speciesId != null)
+            foreach (var creature in Game.Creatures)
             {
-                Game.Network.SendScan("creature", speciesId);
-                Weapons?.Pulse(scanPos, new Color(0.4f, 0.85f, 1f));
-                return;
+                var feet = Game.ScenePos(creature.X, creature.Y, creature.Z);
+                float size = Mathf.Clamp(creature.Size, 0.4f, 8f);
+                if (!ScanRay.SphereEntry(ray, feet + Vector3.up * (0.6f * size), Mathf.Max(0.8f, 0.9f * size),
+                    out float distance) || distance >= best) continue;
+                best = distance;
+                kind = "creature"; key = creature.SpeciesId; at = feet;
             }
-
-            // Micro-fauna (#757): when no real creature is in reach, the nearest ambient critter answers.
-            // Critters are client-local, so the kind is resolved here and the server only validates that it
-            // exists (same trust level as the creature scan above). Shorter reach — they're tiny.
-            if (MicroFaunaView.Instance != null
-                && MicroFaunaView.Instance.NearestCritter(Game.PlayerPosition, 5f, out string critterKey, out var critterAt))
+            var fauna = MicroFaunaView.Instance;
+            if (fauna != null && fauna.Game == Game
+                && fauna.AimedCritter(ray, Mathf.Min(5f, best), out var critterKey, out var critterAt))
             {
-                Game.Network.SendScan("microfauna", critterKey);
-                Weapons?.Pulse(Game.ScenePos(critterAt.x, critterAt.y, critterAt.z), new Color(0.4f, 0.85f, 1f));
-                return;
+                kind = "microfauna"; key = critterKey;
+                at = Game.ScenePos(critterAt.x, critterAt.y, critterAt.z);
             }
-
-            // Voxel ray-march INCLUDING fluids, so you can scan a water/lava block too (they have no collider, so
-            // a Physics.Raycast passes straight through them — that's why water "couldn't be scanned", B26).
-            if (!AimBlock(out var b, out _, includeFluids: true))
-            {
-                return;
-            }
-
-            var def = Game.Content?.BlockById(Game.World.GetBlock(b.x, b.y, b.z));
-            if (def != null)
-            {
-                Game.Network.SendScan("block", def.Key);
-                Weapons?.Pulse(new Vector3(b.x + 0.5f, b.y + 0.5f, b.z + 0.5f), new Color(0.4f, 0.85f, 1f));
-            }
+            return key != null;
         }
 
         private BinocularOptic _optic;
@@ -1258,20 +1249,20 @@ namespace BlocksBeyondTheStars.Client
             Game.Network.SendRepairWreck(t.x, t.y, t.z, item);
         }
 
-        private void HandleStations()
+        internal void RefreshStationPrompt()
         {
-            // Prefer the station you're looking at; fall back to the nearest one you're standing by. (Pure
-            // proximity made a cramped ship always read as the central station, "whatever you looked at".)
+            // The prompt and Interact use the same aimed fixture/marker. Falling back to a nearby station
+            // made an aft hatch say "Cockpit", and could select a console behind an occluding wall.
             Game.NearbyStation = Game.LookedStationType(Camera, Reach);
-            if (string.IsNullOrEmpty(Game.NearbyStation))
-            {
-                Game.NearbyStation = Game.NearestStationType(transform.position, 3f);
-            }
-
             if (string.IsNullOrEmpty(Game.NearbyStation) && Game.NearVendor)
             {
                 Game.NearbyStation = "market"; // a settlement/station vendor → "trade" prompt + E opens the market
             }
+        }
+
+        private void HandleStations()
+        {
+            RefreshStationPrompt();
 
             if (!InputMap.Down(InputAction.Interact))
             {
@@ -1816,7 +1807,10 @@ namespace BlocksBeyondTheStars.Client
                         continue;
                     }
 
-                    var stand = new Vector3(x, hit.point.y + half + 0.05f, z);
+                    // The transform is at the feet (WorldRig center.y = height/2), not the capsule
+                    // center. Respect a different configured center without hovering one half-height up.
+                    float footOffset = _controller.height * 0.5f - _controller.center.y;
+                    var stand = new Vector3(x, hit.point.y + footOffset + _controller.skinWidth + 0.05f, z);
                     if (BlockKeyAt(stand + Vector3.up * 1.1f) == "water")
                     {
                         continue; // solid floor but chest-deep underwater — not a usable surface shot
@@ -2928,9 +2922,13 @@ namespace BlocksBeyondTheStars.Client
         /// Fluids (water/lava) are passed through, matching the collider (which excludes them). Cells are in the
         /// same space the dig intents use; the server + <see cref="ClientWorld"/> both wrap X, so the seam is fine.</summary>
         private bool AimBlock(out Vector3Int hitCell, out Vector3Int placeCell, bool includeFluids = false)
+            => AimBlockHit(out hitCell, out placeCell, out _, includeFluids);
+
+        private bool AimBlockHit(out Vector3Int hitCell, out Vector3Int placeCell, out float distance, bool includeFluids)
         {
             hitCell = default;
             placeCell = default;
+            distance = Reach;
             if (Game?.World == null || Camera == null)
             {
                 return false;
@@ -2958,6 +2956,7 @@ namespace BlocksBeyondTheStars.Client
                 {
                     hitCell = new Vector3Int(x, y, z);
                     placeCell = new Vector3Int(px, py, pz);
+                    distance = t;
                     return true;
                 }
 

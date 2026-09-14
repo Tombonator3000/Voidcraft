@@ -3,6 +3,7 @@
 // This file is part of Blocks Beyond the Stars. See LICENSE for the full AGPL-3.0 text.
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace BlocksBeyondTheStars.Client
 {
@@ -110,6 +111,20 @@ namespace BlocksBeyondTheStars.Client
             _hudCam.allowMSAA = false;
             _hudCam.useOcclusionCulling = false;
             _hudCam.targetTexture = _rt;
+
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset)
+            {
+                // This camera contains transparent UI only. Inheriting renderer 0 ran a second
+                // full-screen SSAO/depth/opaque pipeline for the HUD on Medium and High.
+                var uiData = _hudCam.GetUniversalAdditionalCameraData();
+                uiData.SetRenderer(1); // the project's existing renderer without SSAO
+                uiData.requiresDepthOption = CameraOverrideOption.Off;
+                uiData.requiresColorOption = CameraOverrideOption.Off;
+                uiData.renderShadows = false;
+                uiData.renderPostProcessing = false;
+                uiData.antialiasing = AntialiasingMode.None;
+                uiData.volumeLayerMask = 0;
+            }
 
             // Keep the diegetic HUD out of the main camera's image so only the visor pass shows it.
             MainCamera.cullingMask &= ~(1 << _layer);
@@ -273,9 +288,9 @@ namespace BlocksBeyondTheStars.Client
                 m.SetFloat("_ScanCount", Mathf.Max(120f, _h * 0.5f));
                 m.SetFloat("_Intensity", fx ? _intensity : 0f);
                 m.SetFloat("_Curvature", fx ? 0.012f : 0f);   // gentle bow (was 0.045 — warped/softened the HUD)
-                m.SetFloat("_Chroma", fx ? 0.0015f : 0f);     // whisper of fringe (was 0.005)
+                m.SetFloat("_Chroma", fx ? 0.00015f : 0f);     // subpixel fringe; keep small text legible
                 m.SetVector("_Parallax", fx ? new Vector4(_parallax.x, _parallax.y, 0f, 0f) : Vector4.zero);
-                m.SetFloat("_Glow", fx ? 0.35f : 0f);         // softer hologram bloom (was 0.6)
+                m.SetFloat("_Glow", fx ? 0.12f : 0f);         // restrained glow around the projection
                 m.SetFloat("_Reflect", fx ? 0.02f : 0f);      // barely-there world reflection (was 0.08 — ghosted the frame)
                 m.SetFloat("_RimIntensity", fx ? 0.05f : 0f); // faint edge glow (was 0.10)
             }
@@ -388,9 +403,9 @@ namespace BlocksBeyondTheStars.Client
                 // Stylised — but kept very subtle so the world stays crisp/readable (user: visor was far too strong).
                 _mat.SetFloat("_Intensity", Intensity);
                 _mat.SetFloat("_Curvature", 0.012f);  // gentle bow (was 0.045)
-                _mat.SetFloat("_Chroma", 0.0015f);    // whisper of fringe (was 0.005)
+                _mat.SetFloat("_Chroma", 0.00015f);    // subpixel fringe; keep small text legible
                 _mat.SetVector("_Parallax", new Vector4(Parallax.x, Parallax.y, 0f, 0f));
-                _mat.SetFloat("_Glow", 0.35f);        // softer hologram glow (was 0.6)
+                _mat.SetFloat("_Glow", 0.12f);        // softer hologram glow (was 0.6)
                 _mat.SetFloat("_Reflect", 0.02f);     // barely-there reflection (was 0.08)
                 _mat.SetFloat("_RimIntensity", 0.05f); // faint edge glow (was 0.10)
             }

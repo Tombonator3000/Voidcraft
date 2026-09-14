@@ -106,7 +106,7 @@ namespace BlocksBeyondTheStars.Client
         {
             if (_game == null)
             {
-                _game = FindFirstObjectByType<GameBootstrap>();
+                _game = FindAnyObjectByType<GameBootstrap>();
                 _waterId = 0;
                 _havePlayerPos = false;
                 _haveCenter = false;

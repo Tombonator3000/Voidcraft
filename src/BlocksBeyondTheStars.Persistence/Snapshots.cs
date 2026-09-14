@@ -119,6 +119,7 @@ public sealed class ShipSnapshot
     public float Hull { get; set; } = 100f;
     public float Shield { get; set; }
     public string ShipType { get; set; } = "starter";
+    public int StructureVersion { get; set; }
 
     /// <summary>Wreck flag (<see cref="ShipState.Downed"/>): the ship was lost under KeepShipOnDeath=false and
     /// is grounded until repaired. Persisted so a restart/rejoin doesn't hand back a flight-ready ship for free.</summary>
@@ -332,6 +333,7 @@ public static class StateMapper
         Hull = ship.Hull,
         Shield = ship.Shield,
         ShipType = ship.ShipType,
+        StructureVersion = ship.StructureVersion,
         Downed = ship.Downed,
     };
 
@@ -343,6 +345,7 @@ public static class StateMapper
         Hull = s.Hull,
         Shield = s.Shield,
         ShipType = string.IsNullOrEmpty(s.ShipType) ? "starter" : s.ShipType,
+        StructureVersion = s.StructureVersion,
         Downed = s.Downed,
     };
 }

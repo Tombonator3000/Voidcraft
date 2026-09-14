@@ -84,7 +84,7 @@ Last updated: 2026-08-11.
 | **R** | Repair the targeted wreck breach with the selected hotbar block (see §5 → Wrecks); with a **shaped block, furniture, ladder or stairs** selected: rotate its placement orientation (**Shift+R** cycles backwards — see §5 → Craftable block shapes) |
 | **L** | Toggle the suit headlamp (requires a `suit_lamp`) |
 | **G** | Loot the nearest container |
-| **E** | Use a nearby ship/station tile (cockpit, workshop, cargo, medbay, …); **trade with a vendor** (opens the Market); **board your hover speeder**; **beam** from a teleporter pad you're standing on |
+| **E** | Use the ship/station fixture under your crosshair (cockpit, workshop, cargo, medbay, …); **trade with a nearby vendor** (opens the Market); **board your hover speeder**; **beam** from a teleporter pad you're standing on |
 | **X** | Pack up (stow) a nearby deployed hover speeder back into its item |
 | **T** | Send a trade request to a nearby player |
 | **K** | Send a dock request to a nearby player |
@@ -100,6 +100,8 @@ Last updated: 2026-08-11.
 | **Esc** | Close the current screen; if no game screen is open, show the leave-game confirmation |
 
 Interaction reach is ~6 m (extended by reach equipment).
+Ship station hints follow the fixture or its supporting marker that you actually aim at. Looking at an
+empty doorway or wall does not select another station behind or beside you.
 
 ### Gamepad / controller (experimental)
 
@@ -187,8 +189,16 @@ separate unlock; admins can still disable it through server world rules.
   the Inventory's **Cargo Hold** transfer controls are hidden (the hold is only reachable from aboard the ship).
 - **World map (M)** — top-down view of explored terrain (fog-of-war), with player/ship/station markers and
   click-to-set waypoints.
-- **HUD** — health/oxygen/hunger/energy, hotbar, location, compass, scan readout (bottom-left), and the
-  wreck panel (right) when near a repairable wreck.
+- **HUD** — health, hotbar, location, compass, scan readout (bottom-left), and the wreck panel near a
+  repairable wreck. **Settings → Comfort → Contextual HUD** is enabled by default: oxygen appears when the
+  air is unsafe or reserves are falling; energy appears when used or climate control is active; hunger
+  appears when food is becoming relevant. Ship gauges appear aboard, during EVA or when the hull is damaged.
+  Health and low-resource warnings remain visible. Turn this option off to keep the full resource display
+  and general control reference. In contextual mode the short control line follows the held tool and input
+  device, including remapped actions.
+- **Veyl expedition marker** — a distinct cyan compass marker and a short objective on the right guide the
+  active survey. Its target changes as you uncover the inscription, repair the socket and return home.
+  Your manually chosen map waypoint remains independent.
 - **VEGA panel** — the ship AI speaks through a typewriter speech panel with a persistent **objective
   chip** (live progress, e.g. "mine 1/3") during onboarding. Advance lines with **N**. Advisor hints can
   be muted (Settings → VEGA hints); the tutorial can be skipped or **restarted** from the Settings tab.
@@ -261,6 +271,8 @@ separate unlock; admins can still disable it through server world rules.
   oxygen keeps draining while submerged on non-breathable worlds.
 
 ### Mining & tools
+- Mining debris and impact sounds follow the material you break. **Reduced effects** removes the
+  final contact glint and uses fewer, smaller dust particles; it does not change mining speed or drops.
 - Tools have a **kind** (drill/scanner/…) and **tier** (1–5). A block has a **hardness** and may require a
   minimum tool tier; mining accumulates the tool's power until it exceeds the hardness, then the block
   breaks and yields its **drops**. Powerful drills can clear a small radius — the sweep only takes blocks
@@ -378,6 +390,39 @@ separate unlock; admins can still disable it through server world rules.
   final system and a non-weapon dialogue confrontation.
 - The original **VEGA Protocol** data pack remains bundled for compatible servers and saves. A full story-pack
   selector in the world-creation UI is still planned.
+
+### The first Veyl survey
+
+The Sleeper Signal can place an introductory Veyl site a short walk from a landing pad where the terrain
+has a safe footprint. The dark basalt spire identifies the approach. Existing player buildings are never
+replaced to force a site into place; a body without a safe location may leave this discovery for another
+planet. The introductory survey is separate from the original recovered-log fragment.
+
+New sites lead down a long stepped approach into a hollow vault. Three ordinary blocks can repair a
+shortcut across the broken bridge, or you can follow the continuous side gallery without jumping. If
+you fall into the shallow pit, side steps lead back to the entrance landing. Existing placed sites and
+excavations retain their original layout, including older bridges with an intact central lane.
+
+New starter ships have a wider central aisle, a workshop on the left, a home/service bay on the right and
+a framed forward cockpit. Existing ships keep their original dimensions and player alterations. Approach
+the actual station to use it; the medical spawn is no longer immediately within cockpit reach.
+
+1. Follow the cyan survey marker and use the hand scanner near the exposed surface inscription.
+2. Follow the open stair and excavate the buried contact. Leave enough room to stand in front of it, then
+   scan nearby. Scanning through solid cover or from a remote location does not complete this step.
+3. Place a solid, shaped building block into the indicated socket on its solid support. A plain cube does
+   not restore the signal. The world inscription changes when the connection responds.
+4. Return aboard your own ship to receive a terrain scanner and unlock its blueprint. If your pack is full,
+   make one slot available; the reward remains pending and is granted once, without discarding items.
+5. The terrain scanner adds a through-terrain ore survey action. A physical sample on the workshop display
+   records the completed expedition. Your milestone, altered world blocks and reward survive saving/loading.
+
+If another explorer has already repaired the core, scan the exposed core to acknowledge their work; you do
+not need to dismantle their repair. The displayed specimen stays on the particular owned ship where you
+completed the homecoming, and visitors can see it there.
+
+Server validation owns progress and rewards. Each explorer completes their own survey milestones, while
+physical excavation and construction remain changes in the shared world.
 
 ### VEGA — the ship AI
 - **Onboarding (new worlds):** VEGA guides you through an 8-stage chain (mine → craft → scan → unlock a
@@ -675,7 +720,7 @@ separate unlock; admins can still disable it through server world rules.
 ### Day/night & weather
 - **The world wraps east–west** — the X axis is a longitude, so walking continuously east (or west) brings
   you back to where you started, as if the planet were round. The seam is invisible (terrain, biomes, caves
-  and structures line up exactly). North/south (latitude) does not wrap.
+  and structures line up exactly). North/south (latitude) also wraps across its own seam.
 - **Day/night is by location** — because X is a longitude, a planet has a real day/night terminator: one
   player can be in daylight while another, far away, is in night, and one lap around the world is one day.
   The clock still advances.
@@ -694,6 +739,10 @@ separate unlock; admins can still disable it through server world rules.
   roof is a real answer; rain waters planted flora so it regrows faster; scanners lose range in blown
   grit and charged air; animals hunker down in violent weather; snow settles on the ground and melts
   again when it warms up.
+- **Expedition advice** — the weather card distinguishes open sky, cover and a protected cabin. It
+  recommends shelter or a return when suit charge is low, and reports reduced terrain-scanner range.
+  A roof stops falling-weather damage but only reduces temperature exposure; it does not restore the
+  global scanner range. Watch total suit charge even while an ion storm is charging it.
 - **…and opportunities** — an **ion storm charges an exposed suit**, a **spore bloom** fattens what you
   harvest. Sometimes the right move is to walk into the bad weather. Craft the **weather scanner** to
   read what is coming before you set out.

@@ -61,6 +61,12 @@ public sealed class SpaceStructure
     /// <summary>Interior station markers (medbay/cockpit/workshop/…) in structure-local cells.</summary>
     public List<(string Type, Vector3i Cell)> StationCells { get; } = new();
 
+    /// <summary>Optional presentation yaw for side-facing station fixtures. Legacy anchors face -Z.</summary>
+    public Dictionary<Vector3i, int> StationYaws { get; } = new();
+
+    /// <summary>Authored standing cell for a safe medical spawn, checked after player edits are applied.</summary>
+    public Vector3i? SpawnCell { get; set; }
+
     /// <summary>Doorway base cells (sci-fi slide doors fill these openings) in structure-local coords.</summary>
     public List<Vector3i> DoorCells { get; } = new();
 
@@ -130,7 +136,7 @@ public sealed partial class GameServer
     /// no designed layout fall back to a hollow hull box derived from the design's interior dimensions.</summary>
     private SpaceStructure BuildShipStructure(string ownerId)
         => BuildShipStructureFrom("ship:" + ownerId, ownerId,
-            _content.GetShip(_ship.ShipType) ?? _content.GetShip("starter"), persistEdits: true);
+            _content.GetShip(_ship.ShipType) ?? _content.GetShip("starter"), persistEdits: true, _ship.StructureVersion);
 
     /// <summary>Builds a peaceful NPC trader's ship as a voxel structure straight from a ship-type key — no
     /// player owner, no persisted edits. Reuses the exact player-ship voxel pipeline so a trader renders 1:1
@@ -138,9 +144,10 @@ public sealed partial class GameServer
     /// automatically (the NPC selection enumerates <see cref="GameContent.Ships"/>).</summary>
     private SpaceStructure BuildNpcShipStructure(string structureId, string shipTypeKey)
         => BuildShipStructureFrom(structureId, string.Empty,
-            _content.GetShip(shipTypeKey) ?? _content.GetShip("starter"), persistEdits: false);
+            _content.GetShip(shipTypeKey) ?? _content.GetShip("starter"), persistEdits: false, structureVersion: 1);
 
-    private SpaceStructure BuildShipStructureFrom(string structureId, string ownerId, ShipDefinition? design, bool persistEdits)
+    private SpaceStructure BuildShipStructureFrom(string structureId, string ownerId, ShipDefinition? design, bool persistEdits,
+        int structureVersion)
     {
         var s = new SpaceStructure { Id = structureId, Kind = "ship", OwnerId = ownerId };
 
@@ -155,12 +162,15 @@ public sealed partial class GameServer
             return s; // no hull block in content → an empty structure (client keeps the cube model)
         }
 
-        var layout = _content.GetShipLayout(design?.Layout);
+        // A changed data definition must not move a saved starter or reinterpret its local block edits.
+        bool legacyStarter = design?.Key == "starter" && structureVersion == 0;
+        var layout = legacyStarter ? null : _content.GetShipLayout(design?.Layout);
         if (layout != null && layout.Cells.Count > 0)
         {
             s.Width = layout.Width;
             s.Height = layout.Height;
             s.Length = layout.Length;
+            if (layout.Spawn is { } spawn) s.SpawnCell = new Vector3i(spawn.X, spawn.Y, spawn.Z);
             foreach (var cell in layout.Cells)
             {
                 var p = new Vector3i(cell.X, cell.Y, cell.Z);
@@ -171,6 +181,7 @@ public sealed partial class GameServer
                 {
                     s.Set(p, _content.GetBlock(StationBlockKey(cell.Id))?.NumericId ?? wall);
                     s.StationCells.Add((cell.Id, p));
+                    s.StationYaws[p] = ((cell.Yaw % 360) + 360) % 360;
                     if (cell.Id == "medbay")
                     {
                         s.MedbayCell = p;
@@ -226,15 +237,15 @@ public sealed partial class GameServer
                     }
                 }
 
-            FinishShipStructure(s, persistEdits);
+            FinishShipStructure(s, persistEdits, layout.PreserveAuthoredFinishes);
             return s;
         }
 
         // No designed layout → a simple hollow hull box from the design's interior dims (matches StampShip's
         // box: a shell with a 3-wide rear hatch hole and a front window band).
-        int halfX = System.Math.Max(2, (design?.InteriorWidth ?? 5) / 2);
-        int halfZ = System.Math.Max(2, (design?.InteriorLength ?? 7) / 2);
-        int height = System.Math.Max(3, design?.Height ?? 4);
+        int halfX = legacyStarter ? 2 : System.Math.Max(2, (design?.InteriorWidth ?? 5) / 2);
+        int halfZ = legacyStarter ? 3 : System.Math.Max(2, (design?.InteriorLength ?? 7) / 2);
+        int height = legacyStarter ? 4 : System.Math.Max(3, design?.Height ?? 4);
         s.Width = halfX * 2 + 1;
         s.Height = height + 1;
         s.Length = halfZ * 2 + 1;
@@ -349,10 +360,13 @@ public sealed partial class GameServer
     /// player's own ship) applies the player's persisted edits on top (added blocks; in-space EVA hull
     /// repairs/removals). NPC trader ships pass <paramref name="persistEdits"/> = false: they have no owner
     /// and no per-cell deltas to load.</summary>
-    private void FinishShipStructure(SpaceStructure s, bool persistEdits = true)
+    private void FinishShipStructure(SpaceStructure s, bool persistEdits = true, bool preserveAuthoredFinishes = false)
     {
-        PaintStructureAccents(s);
-        PlaceInteriorLights(s);
+        if (!preserveAuthoredFinishes)
+        {
+            PaintStructureAccents(s);
+            PlaceInteriorLights(s);
+        }
         s.Baseline.Clear();
         s.Baseline.UnionWith(s.Cells.Keys);
         if (persistEdits)

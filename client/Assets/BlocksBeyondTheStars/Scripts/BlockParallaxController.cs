@@ -10,9 +10,8 @@ namespace BlocksBeyondTheStars.Client
     /// or the normal atlas. Medium gets a deliberately subtle/near effect; High gets the full short-range pass.
     /// Potato/Low, reduced-effects mode and Built-in RP keep the shipping <c>BlockAtlas</c> shader unchanged.
     ///
-    /// The parallax shader uses the normal atlas' existing cavity channel as a conservative pseudo-height field.
-    /// That means this first pass costs no extra texture memory and cannot change collision/silhouettes. A true
-    /// authored height atlas can replace that source later without changing the quality/preset plumbing here.
+    /// Authored materials sample dedicated physical height from the packed surface atlas. Legacy tiles
+    /// retain the cavity fallback. This remains a presentation effect and never changes collision or silhouettes.
     /// </summary>
     public sealed class BlockParallaxController : MonoBehaviour
     {
@@ -21,6 +20,46 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int QualityId = Shader.PropertyToID("_ParallaxQuality");
 
         private static BlockParallaxController _instance;
+        private static IInputSource _performanceOwner;
+        private static bool _performanceParallaxEnabled = true;
+
+        /// <summary>Keep the preset shader and lighting while isolating only its parallax sampling cost.
+        /// Available solely to the exclusive owner of an explicit performance run.</summary>
+        public static bool TryOverrideForPerformance(IInputSource owner, bool enabled, out float appliedScale)
+        {
+            appliedScale = -1f;
+            bool allowed = Application.isEditor || System.Array.Exists(System.Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-perfProbe", System.StringComparison.OrdinalIgnoreCase));
+            var controller = _instance;
+            var settings = controller?._game?.Settings;
+            if (!allowed || !InputMap.OwnsVerificationInput(owner)
+                || (_performanceOwner != null && !object.ReferenceEquals(_performanceOwner, owner))
+                || controller == null || controller._material == null || controller._parallaxShader == null
+                || settings == null || settings.ReducedEffects || settings.Preset < QualityPreset.Medium
+                || UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null)
+                return false;
+            _performanceOwner = owner;
+            _performanceParallaxEnabled = enabled;
+            controller.ApplyPreset();
+            appliedScale = controller._material.GetFloat(ScaleId);
+            return controller._material.shader == controller._parallaxShader
+                && (enabled ? appliedScale > 0f : appliedScale == 0f);
+        }
+
+        public static void ReleasePerformanceOverride(IInputSource owner)
+        {
+            if (!object.ReferenceEquals(_performanceOwner, owner)) return;
+            _performanceOwner = null;
+            _performanceParallaxEnabled = true;
+            _instance?.ApplyPreset();
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetPerformanceOverride()
+        {
+            _performanceOwner = null;
+            _performanceParallaxEnabled = true;
+        }
 
         private GameBootstrap _game;
         private Material _material;
@@ -52,7 +91,7 @@ namespace BlocksBeyondTheStars.Client
 
             if (_game == null)
             {
-                _game = FindFirstObjectByType<GameBootstrap>();
+                _game = FindAnyObjectByType<GameBootstrap>();
             }
 
             if (_game == null || _game.ChunkMaterial == null)
@@ -104,7 +143,7 @@ namespace BlocksBeyondTheStars.Client
                 {
                     case QualityPreset.Medium:
                         // Four layers, small displacement, near the camera only. Enough to make cracks/panels
-                        // catch while walking without turning the pixel-art blocks into wobbly relief maps.
+                        // catch while walking without making the broad panels appear to float.
                         enabled = true;
                         scale = 0.010f;
                         distance = 10f;
@@ -130,6 +169,8 @@ namespace BlocksBeyondTheStars.Client
 
             if (enabled)
             {
+                if (_performanceOwner != null && InputMap.OwnsVerificationInput(_performanceOwner)
+                    && !_performanceParallaxEnabled) scale = 0f;
                 _material.SetFloat(ScaleId, scale);
                 _material.SetFloat(DistanceId, distance);
                 _material.SetFloat(QualityId, quality);

@@ -33,7 +33,7 @@ namespace BlocksBeyondTheStars.Client
             public readonly List<Matrix4x4[]> Groups = new List<Matrix4x4[]>();
         }
 
-        private readonly Dictionary<int, DrawBatch> _batches = new Dictionary<int, DrawBatch>();
+        private readonly Dictionary<EntityId, DrawBatch> _batches = new Dictionary<EntityId, DrawBatch>();
         private readonly List<MeshRenderer> _renderers = new List<MeshRenderer>(512);
         private readonly List<Vector3> _vertices = new List<Vector3>(4096);
         private readonly List<Vector3> _normals = new List<Vector3>(4096);
@@ -69,7 +69,7 @@ namespace BlocksBeyondTheStars.Client
             if (Time.unscaledTime < _nextSetup) return;
             _nextSetup = Time.unscaledTime + 0.25f;
 
-            if (_game == null) _game = FindFirstObjectByType<GameBootstrap>();
+            if (_game == null) _game = FindAnyObjectByType<GameBootstrap>();
             if (_camera == null) _camera = Camera.main;
 
             // GameBootstrap intentionally reuses each chunk's Unity Mesh on remesh. A grass->dirt edit can keep
@@ -138,7 +138,7 @@ namespace BlocksBeyondTheStars.Client
             _game.GetComponentsInChildren<MeshRenderer>(false, _renderers);
             Vector3 cameraPos = _camera.transform.position;
             float rangeSq = Range * Range;
-            var alive = new HashSet<int>();
+            var alive = new HashSet<EntityId>();
 
             foreach (var renderer in _renderers)
             {
@@ -150,7 +150,7 @@ namespace BlocksBeyondTheStars.Client
                 Mesh mesh = filter != null ? filter.sharedMesh : null;
                 if (mesh == null || mesh.subMeshCount < 1) continue;
 
-                int key = renderer.GetInstanceID();
+                EntityId key = renderer.GetEntityId();
                 alive.Add(key);
                 uint indexCount = mesh.GetIndexCount(0);
                 if (!_batches.TryGetValue(key, out var batch) || batch.Mesh != mesh
@@ -160,10 +160,10 @@ namespace BlocksBeyondTheStars.Client
                 }
             }
 
-            var remove = new List<int>();
+            var remove = new List<EntityId>();
             foreach (var kv in _batches)
                 if (!alive.Contains(kv.Key) || kv.Value.Renderer == null) remove.Add(kv.Key);
-            foreach (int key in remove) _batches.Remove(key);
+            foreach (EntityId key in remove) _batches.Remove(key);
         }
 
         private DrawBatch BuildBatch(MeshRenderer renderer, Mesh mesh, uint indexCount)
@@ -185,6 +185,7 @@ namespace BlocksBeyondTheStars.Client
             mesh.GetUVs(0, _uvs);
             int[] indices = mesh.GetIndices(0);
             Matrix4x4 l2w = renderer.localToWorldMatrix;
+            int variationSeed = renderer.GetEntityId().GetHashCode();
 
             for (int tri = 0; tri + 2 < indices.Length && _matrixScratch.Count < MaxBladesPerChunk; tri += 3)
             {
@@ -215,16 +216,16 @@ namespace BlocksBeyondTheStars.Client
                 int samples = Mathf.Clamp(Mathf.RoundToInt(area * DensityPerSquareMetre), 1, 3);
                 for (int s = 0; s < samples && _matrixScratch.Count < MaxBladesPerChunk; s++)
                 {
-                    float r1 = Hash01(tri, s, renderer.GetInstanceID());
+                    float r1 = Hash01(tri, s, variationSeed);
                     float r2 = Hash01(tri + 71, s + 17, _worldEpoch + 313);
                     float sr1 = Mathf.Sqrt(r1);
                     float u = 1f - sr1;
                     float v = r2 * sr1;
                     float w = 1f - u - v;
                     Vector3 p = a * u + b * v + c * w + Vector3.up * 0.012f;
-                    float yaw = Hash01(tri + 193, s + 29, renderer.GetInstanceID()) * 360f;
+                    float yaw = Hash01(tri + 193, s + 29, variationSeed) * 360f;
                     float height = Mathf.Lerp(0.34f, 0.68f, Hash01(tri + 389, s + 43, _worldEpoch + 911));
-                    float width = Mathf.Lerp(0.70f, 1.15f, Hash01(tri + 557, s + 59, renderer.GetInstanceID()));
+                    float width = Mathf.Lerp(0.70f, 1.15f, Hash01(tri + 557, s + 59, variationSeed));
                     _matrixScratch.Add(Matrix4x4.TRS(p, Quaternion.Euler(0f, yaw, 0f), new Vector3(width, height, width)));
                 }
             }

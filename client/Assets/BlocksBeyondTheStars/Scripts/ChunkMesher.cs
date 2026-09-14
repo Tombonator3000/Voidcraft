@@ -28,10 +28,10 @@ namespace BlocksBeyondTheStars.Client
         /// Used both by the mesher's flood-fill and by callers when gathering nearby light sources.</summary>
         public const int LightRadius = 9;
 
-        /// <summary>Edge-bevel size (fraction of a block) for plain opaque cubes: exposed CONVEX edges are cut
-        /// with a small 45° chamfer so silhouettes + lighting soften and the world reads less blocky. Only
-        /// applied where two exposed faces meet (a flat field of ground adds ZERO extra geometry — its side
-        /// faces are hidden, so it has no convex edges). Set to 0 to disable the whole bevel pass. Tunable.</summary>
+        /// <summary>Edge-bevel size (fraction of a block) for manufactured opaque cubes: exposed convex edges
+        /// receive a small 45° chamfer. Natural terrain and ore retain full faces because the shared-face
+        /// culling assumes full cells, and chamfers otherwise leave holes at stepped junctions.
+        /// Set to 0 to disable the whole bevel pass. Detailed equipment uses its own authored geometry.</summary>
         public const float BevelAmount = 0.06f;
 
         /// <summary>How far a water SURFACE cell's top face sits below the block top (fraction of a block), so
@@ -378,7 +378,8 @@ namespace BlocksBeyondTheStars.Client
                 // below) rather than dropping straight through it into a cave/void — you must not fall through
                 // lava. The energy gate is a walk-through membrane: players (and server-side NPCs) pass it,
                 // only fauna are held back by the server's fence check.
-                var collKey = content.BlockById(id)?.Key;
+                var blockDefinition = content.BlockById(id);
+                var collKey = blockDefinition?.Key;
                 bool collidable = collKey != "water" && collKey != "fire" && collKey != "energy_gate";
                 int wx = origin.X + x, wy = origin.Y + y, wz = origin.Z + z;
 
@@ -626,10 +627,15 @@ namespace BlocksBeyondTheStars.Client
                     continue;
                 }
 
-                // Edge bevel (T0): plain opaque cubes get their exposed convex edges chamfered. Fluids, glass/
-                // fields, flora + foliage keep hard edges (their shaders/geometry are special). openMask marks
-                // which of the 6 faces are exposed — used to inset only the beveled edges + emit chamfers/corners.
+                // Natural terrain/ore must keep complete exposed faces: full-cell neighbor culling does not
+                // cap a chamfer where exposure changes at an L junction or a step. Material relief supplies
+                // their surface detail without shrinking the render volume away from the solid collision.
+                // Use content categories so added terrain materials inherit the same sealed geometry.
+                bool naturalTerrain = blockDefinition?.Category is "terrain" or "ore";
+                // Manufactured opaque cubes retain their bevels. Fluids, glass/fields, flora and foliage
+                // keep their existing special geometry. openMask records the six exposed cell faces.
                 bool bevel = BevelAmount > 0f && atlas != null && !transparent && !isFlora && !isWood && !foliage
+                    && !naturalTerrain
                     && collKey != "water" && collKey != "lava" && collKey != "fire"
                     && designId == 0; // painted cubes keep hard edges — the bevel strips would sample the design edge texels
                 int openMask = 0;

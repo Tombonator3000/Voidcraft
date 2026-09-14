@@ -322,6 +322,7 @@ public sealed partial class GameServer
             }
 
             session.VegaAdvisorAccum = 0.0;
+            SetCurrent(session); // every advisor/reward response must use this player's ship and cargo
             var p = session.State;
 
             if (p.Oxygen < 25f)
@@ -380,6 +381,7 @@ public sealed partial class GameServer
                 ShipAiHintOnce(session, "poi");
             }
 
+            TickVeylSurveyHomecoming(session);
             TickVegaMemory(session);
             TickVegaBanterFor(session); // LLM smalltalk once onboarding is done (silent without AI)
         }

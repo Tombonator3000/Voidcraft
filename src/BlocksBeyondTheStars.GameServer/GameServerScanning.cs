@@ -73,6 +73,14 @@ public sealed partial class GameServer
             readout.SubjectKey = "monument_" + monument.Archetype;
             readout.Display = readout.SubjectKey; // the client localizes it via ui.scan.subject.*
             readout.InfoKey = "ui.scan.monument." + monument.Archetype;
+            if (monument.Archetype == "veyl_anchor")
+            {
+                if (!VeylSurveyCanRead(session, monument))
+                {
+                    return Rejected(subjectKey, "survey.veyl.signal", "Move to an exposed survey inscription with a scanner.");
+                }
+                readout.InfoKey = ScanVeylSurvey(session, monument);
+            }
             readout.ThreatKey = "ui.scan.threat.inert";
             readout.LegacyInfo = "Ancient inscriptions — origin unknown.";
             readout.LegacyThreat = "Inert";

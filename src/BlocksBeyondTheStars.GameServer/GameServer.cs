@@ -601,6 +601,10 @@ public sealed partial class GameServer
                 {
                     StampChests(); // rare standalone treasure caches (0-N per body)
                 }
+
+                // New survey terrain adapts around every existing content footprint. Pinned survey
+                // reservations are available from metadata before any of the searches above run.
+                if (_config.PlaceMonuments) StampVeylSurvey();
             }
         }
 
@@ -3720,6 +3724,7 @@ public sealed partial class GameServer
 
         SendInventory(session);
         OnAchievementBuild(session);
+        VeylSurveyOnPlace(session, pos);
     }
 
     private void HandleCraft(PlayerSession session, CraftIntent craft)
@@ -4866,6 +4871,7 @@ public sealed partial class GameServer
             SuitEnergy = p.SuitEnergy,
             Hunger = p.Hunger,
             AboardShip = p.AboardShip,
+            VeylSurveyComplete = p.Milestones.Contains(SurveyRewarded),
             InEva = p.InEva,
             AboveAtmosphere = p.AboveAtmosphere,
             SuitClimateActive = p.SuitClimateActive,

@@ -77,7 +77,12 @@ namespace BlocksBeyondTheStars.Client
         private GameObject _playtimePanel; // optional session/total playtime readout (top-right, under the clock)
         private Text _playtimeText;
         private RectTransform _todMarker;
-        private RectTransform _compassShip, _compassWp;
+        private RectTransform _compassShip, _compassWp, _compassSurvey;
+        private GameObject _surveyPanel;
+        private Text _surveyTitle, _surveyObjective;
+        private GameObject _weatherAdvicePanel;
+        private Text _weatherAdviceTitle, _weatherAdviceBody, _weatherAdviceScan;
+        private NetPoi _surveyTarget;
         private Transform _compassParent; // parent for pooled beacon blips (item 37)
         private readonly System.Collections.Generic.List<RectTransform> _compassBeacons = new();
 
@@ -526,6 +531,27 @@ namespace BlocksBeyondTheStars.Client
             // nearly indistinguishable from the 6 px amber beacon blips (#592).
             _compassWp = Blip(comp.transform, new Color(1f, 0.85f, 0.3f), 16f, "map_waypoint");
             _compassParent = comp.transform;
+            _compassSurvey = Blip(comp.transform, new Color(0.40f, 0.95f, 0.89f), 13f, "map_waypoint");
+            _surveyPanel = Panel(root, W - 310f, 294f, 300f, 90f).gameObject;
+            _surveyTitle = UiKit.AddText(_surveyPanel.transform, 12, 8, 276, 20, string.Empty,
+                14, new Color(0.40f, 0.95f, 0.89f), TextAnchor.MiddleLeft, FontStyle.Bold);
+            _surveyObjective = UiKit.AddText(_surveyPanel.transform, 12, 32, 276, 48, string.Empty,
+                14, UiKit.TextCol, TextAnchor.UpperLeft);
+            _surveyPanel.SetActive(false);
+
+            // Server-owned current protection/advice, below the expedition objective. It never changes
+            // the player waypoint or claims that a roof restores the global terrain-scanner radius.
+            _weatherAdvicePanel = Panel(root, W - 310f, 394f, 300f, 156f).gameObject;
+            _weatherAdviceTitle = UiKit.AddText(_weatherAdvicePanel.transform, 12, 8, 276, 34, string.Empty,
+                14, UiKit.Cyan, TextAnchor.UpperLeft, FontStyle.Bold);
+            _weatherAdviceBody = UiKit.AddText(_weatherAdvicePanel.transform, 12, 48, 276, 58, string.Empty,
+                14, UiKit.TextCol, TextAnchor.UpperLeft);
+            _weatherAdviceScan = UiKit.AddText(_weatherAdvicePanel.transform, 12, 110, 276, 38, string.Empty,
+                13, UiKit.CyanDim, TextAnchor.UpperLeft);
+            _weatherAdviceTitle.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _weatherAdviceBody.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _weatherAdviceScan.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _weatherAdvicePanel.SetActive(false);
 
             // Time of day + temperature.
             var tod = Panel(root, W - 210f, 140, 200, 56);
@@ -693,18 +719,23 @@ namespace BlocksBeyondTheStars.Client
                 : baseAir ? "  (" + loc.Get("ui.hud.base_air") + ")"
                 : string.Empty;
             string oxy = loc.Get("ui.hud.oxygen") + oxySuffix;
-            SetVital(1, oxy, Game.Oxygen, Game.Oxygen / 100f, Oxygen, true);
+            bool context = Settings == null || Settings.ContextHud;
+            bool showOxygen = !context || (!breathable && !baseAir) || ContextVitalVisible(1, Game.Oxygen, 85f);
+            SetVital(1, oxy, Game.Oxygen, Game.Oxygen / 100f, Oxygen, showOxygen);
             // While climate control fights heat/cold/vacuum (#666) the energy bar turns stress-orange.
             SetVital(2, loc.Get("ui.hud.energy"), Game.SuitEnergy, Game.SuitEnergy / 100f,
-                Game.SuitClimateActive ? EnergyStressed : Energy, true);
-            SetVital(3, loc.Get("ui.hud.hunger"), Game.Hunger, Game.Hunger / 100f, Hunger, true);
+                Game.SuitClimateActive ? EnergyStressed : Energy,
+                !context || Game.SuitClimateActive || ContextVitalVisible(2, Game.SuitEnergy, 75f));
+            SetVital(3, loc.Get("ui.hud.hunger"), Game.Hunger, Game.Hunger / 100f, Hunger,
+                !context || ContextVitalVisible(3, Game.Hunger, 65f));
             // Ship rows (hull/shield) exist whenever the player owns a ship in combat range — but while
             // PILOTING they repeat the flight instrument line (SPD/THR/HDG + HULL/SHD, bottom-left), so
             // hide them there, exactly as the compass and the time-of-day panel already do (#915). On an
             // EVA the instrument line is hidden (it needs !_eva), so these bars are the only hull readout
             // and must stay.
             bool piloting = Game.SpaceViewActive && !Game.InEva;
-            bool ship = Game.ShipCombat != null && !piloting;
+            bool ship = Game.ShipCombat != null && !piloting && (!context || Game.Aboard || Game.InEva
+                || Game.ShipCombat.Hull < Game.ShipCombat.HullMax * 0.99f);
             if (ship)
             {
                 var c = Game.ShipCombat;
@@ -717,7 +748,16 @@ namespace BlocksBeyondTheStars.Client
                 SetVital(5, null, 0, 0, ShieldC, false);
             }
 
-            float vitalsHeight = ship ? 196f : 116f;
+            int visibleRows = 0;
+            foreach (var row in _vitals)
+            {
+                if (row.Go.activeSelf)
+                {
+                    UiKit.Place(row.Go, 10, 8 + visibleRows * 24, 200, 20);
+                    visibleRows++;
+                }
+            }
+            float vitalsHeight = 16f + visibleRows * 24f;
             _vitalsPanel.GetComponent<RectTransform>().sizeDelta = new Vector2(226, vitalsHeight);
             VitalsBottomY = VitalsPanelY + vitalsHeight;
 
@@ -728,7 +768,7 @@ namespace BlocksBeyondTheStars.Client
             _toast.text = Game.LastMessage ?? string.Empty;
             _inSpace.text = Game.InSpace ? loc.Get("ui.hud.in_space") : string.Empty;
             _observer.text = Game.Spectating ? loc.Get("ui.hud.observer") : string.Empty;
-            _hint.text = InputMap.ActiveDevice switch
+            _hint.text = context ? ContextHint(loc) : InputMap.ActiveDevice switch
             {
                 // On touch the on-screen buttons are self-labelling, so the text hint just adds clutter.
                 InputDeviceKind.Touch => string.Empty,
@@ -776,7 +816,7 @@ namespace BlocksBeyondTheStars.Client
                         : $"ui.station.{Game.NearbyStation}";
                     prompt = $"{loc.Get("ui.hud.use")}: {loc.Get(stationKey)}";
                 }
-                else if (HoldingScanner())
+                else if (HoldingScanner() && !context)
                 {
                     prompt = loc.Get("ui.scan.use_hint");
                 }
@@ -787,6 +827,8 @@ namespace BlocksBeyondTheStars.Client
             // flight view is up or a speeder is driven, so showing the prompt there was a dead key.
             _loot.text = Game.SpaceViewActive || !string.IsNullOrEmpty(Game.InSpeeder) ? string.Empty : LootText(loc);
 
+            RefreshSurvey(loc);
+            RefreshWeatherAdvice(loc);
             RefreshScan(loc);
             RefreshWreck(loc);
             RefreshShipRepair(loc);
@@ -848,17 +890,88 @@ namespace BlocksBeyondTheStars.Client
 
         // --- vitals ---
 
+        private bool ContextVitalVisible(int index, float value, float threshold)
+            => value < threshold || (_vitals[index].Go.activeSelf && value < threshold + 10f);
+
+        private string ContextHint(BlocksBeyondTheStars.Shared.Localization.Localizer loc)
+        {
+            if (InputMap.ActiveDevice == InputDeviceKind.Touch) return string.Empty;
+            bool pad = InputMap.ActiveDevice == InputDeviceKind.Gamepad;
+            string held = Game.ItemInSlot(Game.SelectedHotbarSlot);
+            var item = string.IsNullOrEmpty(held) ? null : Game.Content?.GetItem(held);
+            var kind = item?.Tool?.Kind ?? BlocksBeyondTheStars.Shared.Definitions.ToolKind.None;
+            string key = pad ? "walk_pad" : "walk";
+            if (Game.SpaceViewActive && !Game.InEva) key = "flight";
+            else if (HoldingScanner()) key = "scan";
+            else if (kind == BlocksBeyondTheStars.Shared.Definitions.ToolKind.Drill) key = "mine";
+            else if (Game.HoldingRotatableBlock || (!string.IsNullOrEmpty(held) && Game.Content?.GetBlock(held) != null)) key = "build";
+            else if (kind == BlocksBeyondTheStars.Shared.Definitions.ToolKind.Weapon) key = "weapon";
+            else if (kind == BlocksBeyondTheStars.Shared.Definitions.ToolKind.Gadget) key = "gadget";
+            else if (kind == BlocksBeyondTheStars.Shared.Definitions.ToolKind.Repair) key = "repair";
+            return loc.Get("ui.hud.context_" + key)
+                .Replace("{mine}", pad ? "RB" : loc.Get("ui.key.mouse_left"))
+                .Replace("{place}", pad ? "LB" : loc.Get("ui.key.mouse_right"))
+                .Replace("{use}", GlyphText(loc, InputAction.Interact))
+                .Replace("{attack}", GlyphText(loc, InputAction.PrimaryFire))
+                .Replace("{lamp}", GlyphText(loc, InputAction.ToggleLamp))
+                .Replace("{repair}", GlyphText(loc, InputAction.RepairWreck))
+                .Replace("{autopilot}", GlyphText(loc, InputAction.FlightAutopilot))
+                .Replace("{interior}", GlyphText(loc, InputAction.FlightEnterInterior))
+                .Replace("{menu}", loc.Get(pad ? "ui.hud.context_menu_pad" : "ui.hud.context_menu"));
+        }
+
+        private void RefreshSurvey(BlocksBeyondTheStars.Shared.Localization.Localizer loc)
+        {
+            _surveyTarget = null;
+            if (!Game.SpaceViewActive && Game.PlanetPois != null)
+            {
+                foreach (var poi in Game.PlanetPois)
+                {
+                    if (poi.Type is "veyl_signal" or "veyl_excavate" or "veyl_shape" or "veyl_return")
+                    {
+                        _surveyTarget = poi;
+                        break;
+                    }
+                }
+            }
+            _surveyPanel.SetActive(_surveyTarget != null);
+            if (_surveyTarget == null) return;
+            float dx = Game.SceneX(_surveyTarget.X) - Game.PlayerPosition.x;
+            float dz = Game.SceneZ(_surveyTarget.Z) - Game.PlayerPosition.z;
+            string distance = loc.Get("veyl.distance").Replace("{0}", Mathf.RoundToInt(Mathf.Sqrt(dx * dx + dz * dz)).ToString());
+            _surveyTitle.text = _surveyTarget.Name + "  ·  " + distance;
+            _surveyObjective.text = loc.Get("veyl.objective." + _surveyTarget.Type.Substring(5));
+        }
+
+        private void RefreshWeatherAdvice(BlocksBeyondTheStars.Shared.Localization.Localizer loc)
+        {
+            var environment = Game.Environment;
+            bool show = Game.WorldReady && !Game.SpaceViewActive && !Game.InEva && environment != null
+                && !string.IsNullOrEmpty(environment.WeatherAdviceKey);
+            _weatherAdvicePanel.SetActive(show);
+            if (!show) return;
+            _weatherAdviceTitle.text = loc.Get("weather." + environment.Weather) + " · "
+                + loc.Get(environment.WeatherProtectionKey);
+            _weatherAdviceTitle.color = environment.WeatherAdviceUrgency >= 2 ? Health
+                : environment.WeatherAdviceUrgency == 1 ? EnergyStressed : UiKit.Cyan;
+            _weatherAdviceBody.text = loc.Get(environment.WeatherAdviceKey);
+            bool impaired = environment.TerrainScanWeatherFactor < 0.99f;
+            _weatherAdviceScan.gameObject.SetActive(impaired);
+            _weatherAdviceScan.text = impaired ? string.Format(loc.Get("weather.advice.scan_range"),
+                Mathf.RoundToInt(environment.TerrainScanWeatherFactor * 100f)) : string.Empty;
+        }
+
         private VitalRow MakeVital(Transform parent, float x, float y, string key)
         {
             var go = new GameObject("Vital_" + key, typeof(RectTransform));
             go.transform.SetParent(parent, false);
             UiKit.Place(go, x, y, 200, 16);
-            UiKit.AddImage(go.transform, 22, 0, 178, 16, UiKit.SolidSprite, new Color(0.03f, 0.07f, 0.13f, 0.9f));
-            var fill = UiKit.AddImage(go.transform, 22, 0, 178, 16, UiKit.SolidSprite, Color.white);
+            UiKit.AddImage(go.transform, 0, 17, 200, 3, UiKit.SolidSprite, new Color(0.03f, 0.07f, 0.13f, 0.9f));
+            var fill = UiKit.AddImage(go.transform, 0, 17, 200, 3, UiKit.SolidSprite, Color.white);
             fill.type = Image.Type.Filled;
             fill.fillMethod = Image.FillMethod.Horizontal;
             fill.fillOrigin = (int)Image.OriginHorizontal.Left;
-            var label = UiKit.AddText(go.transform, 28, 0, 172, 16, string.Empty, 12, UiKit.TextCol, TextAnchor.MiddleLeft);
+            var label = UiKit.AddText(go.transform, 0, 0, 200, 16, string.Empty, 12, UiKit.TextCol, TextAnchor.MiddleLeft);
             return new VitalRow { Fill = fill, Label = label, Go = go };
         }
 
@@ -1382,6 +1495,8 @@ namespace BlocksBeyondTheStars.Client
 
             const float radius = 44f;
             PlaceBlip(_compassWp, Game.Waypoint.HasValue, Game.Waypoint ?? Vector3.zero, radius, out float wpDist);
+            PlaceBlip(_compassSurvey, _surveyTarget != null,
+                _surveyTarget == null ? Vector3.zero : new Vector3(_surveyTarget.X, 0, _surveyTarget.Z), radius);
             PlaceBlip(_compassShip, Game.ShipPosition.HasValue, Game.ShipPosition ?? Vector3.zero, radius, out float dist);
 
             // This runs per frame, so only rebuild the distance strings when the rounded value changed.

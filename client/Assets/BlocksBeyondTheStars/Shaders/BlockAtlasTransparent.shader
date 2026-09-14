@@ -5,8 +5,8 @@
 //   _Sc_SunDir = world-space direction TO the sun
 //
 // DUAL-PIPELINE (URP migration): SubShader 1 is the URP port (HLSL, UniversalForward — also receives the sun's
-// shadow on the directional term so water/glass dims under shadow); SubShader 2 is the original Built-in RP
-// pass (CG, unchanged). Transparent surfaces cast no shadows (no ShadowCaster) by design.
+// shadow on the directional term so water/glass dims under shadow); SubShader 2 is the matching Built-in RP
+// pass (CG). Transparent surfaces cast no shadows (no ShadowCaster) by design.
 Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
 {
     Properties
@@ -47,6 +47,20 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
             float4 _Sc_Sky;   // sky colour (set by Sky.cs) — water SSR sky fallback
             float _Sc_ScreenFx; // 1 when the depth+opaque textures exist (Medium+); 0 on Low → water uses the simple look
             float _BaseAlpha;
+
+            // The water reflection ray marches through non-uniform control flow. Explicit LOD avoids
+            // undefined screen derivatives there; preserve URP's stereo/dynamic-resolution UV clamping.
+            float ReadSceneDepthStable(float2 uv)
+            {
+                uv = ClampAndScaleUVForBilinear(UnityStereoTransformScreenSpaceTex(uv), _CameraDepthTexture_TexelSize.xy);
+                return SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_PointClamp, uv, 0).r;
+            }
+
+            float3 ReadSceneColorStable(float2 uv)
+            {
+                uv = ClampAndScaleUVForBilinear(UnityStereoTransformScreenSpaceTex(uv), _CameraOpaqueTexture_TexelSize.xy);
+                return SAMPLE_TEXTURE2D_X_LOD(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, uv, 0).rgb;
+            }
 
             struct Attributes
             {
@@ -190,7 +204,7 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
                     // behind this pixel, then darken+blue with depth (you can't see the bottom of a deep sea)
                     // and froth a bright foam line where geometry breaks the surface (shores, rocks, swimmers).
                     float2 screenUV = GetNormalizedScreenSpaceUV(i.positionCS);
-                    float sceneEye = LinearEyeDepth(SampleSceneDepth(screenUV), _ZBufferParams);
+                    float sceneEye = LinearEyeDepth(ReadSceneDepthStable(screenUV), _ZBufferParams);
                     float fragEye = -TransformWorldToView(i.wp).z;
                     float column = max(0.0, sceneEye - fragEye); // metres of water column ALONG THE VIEW RAY
                     // Depth tint keys on the VERTICAL water depth, not the ray length: at a shallow viewing
@@ -216,7 +230,7 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
                     float2 wob = float2(sin(i.wp.x * 1.3 + t * 1.5) + sin(i.wp.z * 0.9 - t * 1.1),
                                         cos(i.wp.z * 1.2 + t * 1.3) + sin(i.wp.x * 0.7 - t * 0.9));
                     float refr = 0.018 * (1.0 - depth01); // shallow distorts the visible bed; deep hides it anyway
-                    float3 bed = SampleSceneColor(screenUV + wob * refr);
+                    float3 bed = ReadSceneColorStable(screenUV + wob * refr);
                     col = lerp(bed, col, saturate(alpha));
 
                     // Screen-space reflection on the surface: mirror the view ray about the (wave-rippled) normal
@@ -243,18 +257,18 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
                         float2 ruv = cp.xy / cp.w * 0.5 + 0.5;
                         if (_ProjectionParams.x < 0.0) { ruv.y = 1.0 - ruv.y; }
                         if (ruv.x < 0.0 || ruv.x > 1.0 || ruv.y < 0.0 || ruv.y > 1.0) { break; }
-                        float hitEye = LinearEyeDepth(SampleSceneDepth(ruv), _ZBufferParams);
+                        float hitEye = LinearEyeDepth(ReadSceneDepthStable(ruv), _ZBufferParams);
                         float rayEye = -TransformWorldToView(sp).z;
                         if (rayEye > hitEye + 0.1 && rayEye < hitEye + 4.0)
                         {
                             // Soft 5-tap blur of the reflected scene colour so the mirror is gently diffused
                             // (water is never a perfect mirror) — kills the "too hard" sharp reflection.
                             float2 br = 0.0035;
-                            reflCol = (SampleSceneColor(ruv)
-                                     + SampleSceneColor(ruv + float2(br.x, 0.0))
-                                     + SampleSceneColor(ruv - float2(br.x, 0.0))
-                                     + SampleSceneColor(ruv + float2(0.0, br.y))
-                                     + SampleSceneColor(ruv - float2(0.0, br.y))) * 0.2;
+                            reflCol = (ReadSceneColorStable(ruv)
+                                     + ReadSceneColorStable(ruv + float2(br.x, 0.0))
+                                     + ReadSceneColorStable(ruv - float2(br.x, 0.0))
+                                     + ReadSceneColorStable(ruv + float2(0.0, br.y))
+                                     + ReadSceneColorStable(ruv - float2(0.0, br.y))) * 0.2;
                             break;
                         }
                     }
@@ -268,12 +282,16 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
                 }
                 else
                 {
-                    // Plain glass (no emission) reads as a frosted, milky pane — clearly glass, not an open hole
-                    // — while emissive energy fields stay an airy, see-through curtain.
-                    float isField = saturate(emission * 4.0);          // ~0 for glass, ~1 for energy fields
-                    col = lerp(col + light * 0.16, col, isField);      // a soft white frost on glass only
-                    alpha = lerp(0.72, _BaseAlpha, isField);           // milky glass vs. see-through field
-                    alpha = saturate(alpha + emission * 0.15);
+                    // Optical ship glass: a clear central view with restrained grazing reflections.
+                    // Keep atlas alpha at one: lower tile alpha identifies WATER above, not glass.
+                    float isField = saturate(emission * 4.0);
+                    float3 view = normalize(_WorldSpaceCameraPos.xyz - i.wp);
+                    float grazing = pow(1.0 - saturate(abs(dot(N, view))), 5.0);
+                    float3 glassTint = float3(0.22, 0.34, 0.40) * light;
+                    float sunGlint = pow(saturate(dot(reflect(-view, N), L)), 180.0) * 0.22;
+                    float3 glass = glassTint + light * (0.12 * grazing + sunGlint);
+                    col = lerp(glass, col, isField);
+                    alpha = lerp(0.075 + 0.20 * grazing, _BaseAlpha + emission * 0.15, isField);
                 }
 
                 half4 outc = half4(col, alpha);
@@ -284,7 +302,7 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
         }
     }
 
-    // ---------------- Built-in RP (original, unchanged) ----------------
+    // ---------------- Built-in RP ----------------
     SubShader
     {
         Tags { "RenderType" = "Transparent" "Queue" = "Transparent" "IgnoreProjector" = "True" }
@@ -431,12 +449,16 @@ Shader "BlocksBeyondTheStars/BlockAtlasTransparent"
                 }
                 else
                 {
-                    // Plain glass (no emission) reads as a frosted, milky pane — clearly glass, not an open hole
-                    // — while emissive energy fields stay an airy, see-through curtain.
-                    float isField = saturate(emission * 4.0);          // ~0 for glass, ~1 for energy fields
-                    col = lerp(col + light * 0.16, col, isField);      // a soft white frost on glass only
-                    alpha = lerp(0.72, _BaseAlpha, isField);           // milky glass vs. see-through field
-                    alpha = saturate(alpha + emission * 0.15);
+                    // Optical ship glass: a clear central view with restrained grazing reflections.
+                    // Keep atlas alpha at one: lower tile alpha identifies WATER above, not glass.
+                    float isField = saturate(emission * 4.0);
+                    float3 view = normalize(_WorldSpaceCameraPos.xyz - i.wp);
+                    float grazing = pow(1.0 - saturate(abs(dot(N, view))), 5.0);
+                    float3 glassTint = float3(0.22, 0.34, 0.40) * light;
+                    float sunGlint = pow(saturate(dot(reflect(-view, N), L)), 180.0) * 0.22;
+                    float3 glass = glassTint + light * (0.12 * grazing + sunGlint);
+                    col = lerp(glass, col, isField);
+                    alpha = lerp(0.075 + 0.20 * grazing, _BaseAlpha + emission * 0.15, isField);
                 }
 
                 fixed4 outc = fixed4(col, alpha);

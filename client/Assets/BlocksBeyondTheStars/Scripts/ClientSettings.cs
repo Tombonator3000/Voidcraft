@@ -261,6 +261,9 @@ namespace BlocksBeyondTheStars.Client
         // Accessibility
         public bool ReducedEffects = false;
 
+        /// <summary>Show controls for the held tool and only currently relevant resource gauges.</summary>
+        public bool ContextHud = true;
+
         /// <summary>Legacy one-shot "large UI" flag. Superseded by the continuous <see cref="UiScale"/>
         /// setting (#483); kept only so an existing settings file that has it on is migrated once, in
         /// <see cref="Apply"/>'s caller, rather than silently losing the player's preference.</summary>

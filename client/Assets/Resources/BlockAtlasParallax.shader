@@ -8,6 +8,8 @@ Shader "BlocksBeyondTheStars/BlockAtlasParallax"
     {
         _MainTex ("Atlas", 2D) = "white" {}
         _NormalTex ("Normal", 2D) = "bump" {}
+        _SurfaceTex ("Roughness / Metal / Emission / Height", 2D) = "black" {}
+        _SurfaceMapsEnabled ("Authored surfaces", Float) = 0
         _LeafCutoff ("Leaf alpha cutoff", Range(0,1)) = 0.5
         _ParallaxScale ("Parallax scale", Range(0,0.05)) = 0.01
         _ParallaxDistance ("Parallax distance", Float) = 10
@@ -35,6 +37,8 @@ Shader "BlocksBeyondTheStars/BlockAtlasParallax"
 
             TEXTURE2D(_MainTex);   SAMPLER(sampler_MainTex);
             TEXTURE2D(_NormalTex); SAMPLER(sampler_NormalTex);
+            TEXTURE2D(_SurfaceTex); SAMPLER(sampler_SurfaceTex);
+            float _SurfaceMapsEnabled;
 
             float4 _Sc_Light;
             float4 _Sc_SunDir;
@@ -96,11 +100,17 @@ Shader "BlocksBeyondTheStars/BlockAtlasParallax"
                 return o;
             }
 
-            // The existing normal atlas packs cavity AO in alpha: 1 = flat/open texel, lower values =
-            // crack/seam/rivet edges. Treat those lower values as depth. Flat areas therefore produce zero
-            // parallax offset, which avoids the common pseudo-height bug where an entire dark tile appears to slide.
+            // Dedicated height is independent of paint and occlusion. Legacy tiles retain the
+            // previous restrained cavity fallback; paint-design materials explicitly opt out.
             float CavityHeight(float2 uv)
             {
+                float4 surface = SAMPLE_TEXTURE2D_LOD(_SurfaceTex, sampler_SurfaceTex, uv, 0);
+                if (_SurfaceMapsEnabled > 0.5 && surface.a >= 0.49)
+                {
+                    // The authored broad panel is height .65: anchor it to the face plane. Only
+                    // actual recesses move inward, so a painted flat surface does not slide with view.
+                    return saturate((surface.a * 2.0 - 1.0) + 0.35);
+                }
                 float cavity = SAMPLE_TEXTURE2D_LOD(_NormalTex, sampler_NormalTex, uv, 0).a;
                 return lerp(0.60, 1.0, saturate(cavity));
             }
@@ -223,9 +233,12 @@ Shader "BlocksBeyondTheStars/BlockAtlasParallax"
                 float nightFloor = saturate(0.6 - dot(light, float3(0.299, 0.587, 0.114)));
                 col += albedo * float3(0.10, 0.13, 0.20) * (sky * nightFloor) * faceAo;
 
-                float gloss = i.mat.r;
-                float metal = i.mat.g;
-                float rough = clamp(1.0 - gloss, 0.045, 1.0);
+                float4 surface = SAMPLE_TEXTURE2D(_SurfaceTex, sampler_SurfaceTex, uv);
+                float authored = step(0.49, surface.a) * saturate(_SurfaceMapsEnabled);
+                float rough = clamp(lerp(1.0 - i.mat.r, surface.r, authored), 0.08, 1.0);
+                float gloss = 1.0 - rough;
+                float metal = lerp(i.mat.g, surface.g, authored);
+                float emissionMask = lerp(1.0, surface.b, authored);
 
                 float3 H = normalize(L + V);
                 float nh = saturate(dot(N, H));
@@ -267,7 +280,7 @@ Shader "BlocksBeyondTheStars/BlockAtlasParallax"
                     float veins = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin((lw.x + lw.y) * 0.55 + lt * 1.1) + slab * 0.3);
                     lavaGlow = clamp(1.0 + 0.7 * slab + 0.9 * veins, 0.2, 2.2);
                 }
-                col += albedo * i.mat.a * (3.0 * lavaGlow);
+                col += albedo * i.mat.a * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow);
 
                 float blLen = length(i.blDir);
                 if (blLen > 0.01)

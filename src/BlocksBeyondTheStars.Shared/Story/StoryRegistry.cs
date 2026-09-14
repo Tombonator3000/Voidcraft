@@ -57,6 +57,7 @@ public static class StoryRegistry
     {
         Id = DefaultStoryId,
         NameKey = "story.voidcraft_awakening.name",
+        SurveyRewardItemKey = "terrain_scanner",
         FragmentWeight = 3,
         KillWeight = 1,
         MilestoneWeight = 2,

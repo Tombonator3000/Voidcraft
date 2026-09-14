@@ -50,7 +50,7 @@ namespace BlocksBeyondTheStars.Client
 
             if (_game == null)
             {
-                _game = FindFirstObjectByType<GameBootstrap>();
+                _game = FindAnyObjectByType<GameBootstrap>();
             }
 
             var env = _game?.Environment;

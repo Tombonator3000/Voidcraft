@@ -32,9 +32,11 @@ namespace BlocksBeyondTheStars.Client
 
         /// <summary>One authored cell: palette id + kind plus the in-game per-voxel modifiers (dye/glow
         /// colour 0xRRGGBB, packed shape+orientation). Elements/stations carry no modifiers.</summary>
-        private struct CellData { public string Id; public string Kind; public int Tint, Glow, Shape; }
+        private struct CellData { public string Id; public string Kind; public int Tint, Glow, Shape, Yaw; }
 
         private readonly Dictionary<Vector3i, CellData> _design = new();   // cell -> authored cell (export source)
+        private ExportLayoutJson _loadedLayout;
+        private Vector3i _loadedMaxCell;
         private EditorVoxelChunkView _view;                                // chunked combined-mesh renderer
 
         private BlockTextureAtlas _atlas;                                  // editor-local atlas for palette icons + cell colours
@@ -100,7 +102,7 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>A ship element/station palette entry: localized via <c>ui.part.*</c>, grouped under "parts".</summary>
         private EditorPaletteKit.Entry P(string id, string kind, Color c) => new EditorPaletteKit.Entry
         {
-            Id = id, Label = L("ui.part." + id), Kind = kind, Group = "parts", Color = c,
+            Id = id, Label = L((id == "lab" || id == "console" ? "ui.station." : "ui.part.") + id), Kind = kind, Group = "parts", Color = c,
         };
 
         /// <summary>The ship palette: the special ship elements + stations + weapons, followed by every
@@ -126,6 +128,8 @@ namespace BlocksBeyondTheStars.Client
                 P("workshop", "station", new Color(0.75f, 0.65f, 0.4f)),
                 P("medbay", "station", new Color(0.9f, 0.95f, 1f)),
                 P("quarters", "station", new Color(0.6f, 0.45f, 0.8f)),
+                P("lab", "station", new Color(0.3f, 0.65f, 0.8f)),
+                P("console", "station", new Color(0.3f, 0.6f, 0.95f)),
                 P("cargo", "station", new Color(0.7f, 0.6f, 0.45f)),
                 P("hangar", "station", new Color(0.35f, 0.4f, 0.46f)),
                 P("ship_laser_basic", "station", new Color(0.45f, 1f, 1f)),
@@ -340,6 +344,7 @@ namespace BlocksBeyondTheStars.Client
         private void PlaceCell(Vector3i cell, EditorPaletteKit.Entry pal)
         {
             var data = new CellData { Id = pal.Id, Kind = pal.Kind };
+            if (pal.Kind == "station") data.Yaw = _brushOrient * 90;
             if (pal.Kind == "block")
             {
                 // Only real blocks carry dye/glow/shape (elements + stations are special-rendered anchors).
@@ -611,8 +616,15 @@ namespace BlocksBeyondTheStars.Client
 
         // ----------------------------- export -----------------------------
 
-        [Serializable] private sealed class ExportCellJson { public int x, y, z; public string kind, id; public int tint, glow, shape; }
-        [Serializable] private sealed class ExportLayoutJson { public int width, height, length; public List<ExportCellJson> cells = new(); }
+        [Serializable] private sealed class ExportCellJson { public int x, y, z; public string kind, id; public int tint, glow, shape, yaw; }
+        [Serializable] private sealed class ExportSpawnJson { public int x, y, z; }
+        [Serializable] private sealed class ExportLayoutJson
+        {
+            public int width, height, length;
+            public bool preserveAuthoredFinishes;
+            public ExportSpawnJson spawn;
+            public List<ExportCellJson> cells = new();
+        }
         [Serializable] private sealed class ExportCostJson { public string item; public int count; }
         [Serializable] private sealed class ExportShipJson
         {
@@ -631,25 +643,7 @@ namespace BlocksBeyondTheStars.Client
                 return;
             }
 
-            int maxX = 0, maxY = 0, maxZ = 0;
-            var layout = new ExportLayoutJson();
-            foreach (var kv in _design)
-            {
-                var d = kv.Value;
-                layout.cells.Add(new ExportCellJson
-                {
-                    x = kv.Key.X, y = kv.Key.Y, z = kv.Key.Z,
-                    kind = string.IsNullOrEmpty(d.Kind) ? "block" : d.Kind, id = d.Id,
-                    tint = d.Tint, glow = d.Glow, shape = d.Shape,
-                });
-                maxX = Mathf.Max(maxX, kv.Key.X);
-                maxY = Mathf.Max(maxY, kv.Key.Y);
-                maxZ = Mathf.Max(maxZ, kv.Key.Z);
-            }
-
-            layout.width = maxX + 1;
-            layout.height = maxY + 1;
-            layout.length = maxZ + 1;
+            var layout = BuildLayoutExport();
 
             var ship = new ExportShipJson
             {
@@ -755,6 +749,8 @@ namespace BlocksBeyondTheStars.Client
 
                 _view.Clear();
                 _design.Clear();
+                _loadedLayout = layout;
+                _loadedMaxCell = Vector3i.Zero;
 
                 if (layout?.cells != null)
                 {
@@ -762,7 +758,11 @@ namespace BlocksBeyondTheStars.Client
                     {
                         var cell = new Vector3i(c.x, c.y, c.z);
                         var pal = System.Array.Find(_palette, p => p.Id == c.id);
-                        if (pal.Id == null || !InBounds(cell) || _design.ContainsKey(cell))
+                        // Existing layouts carry engines, threshold steps and wings outside the hull box.
+                        // Preserve those authored cells without expanding the hull's declared footprint.
+                        bool storedBounds = cell.X >= -MaxW && cell.X < MaxW && cell.Y >= -MaxH
+                            && cell.Y < MaxH && cell.Z >= -MaxL && cell.Z < MaxL;
+                        if (pal.Id == null || !storedBounds || _design.ContainsKey(cell))
                         {
                             continue; // unknown palette id or out of bounds
                         }
@@ -771,9 +771,11 @@ namespace BlocksBeyondTheStars.Client
                         {
                             Id = c.id,
                             Kind = string.IsNullOrEmpty(c.kind) ? pal.Kind : c.kind,
-                            Tint = c.tint, Glow = c.glow, Shape = c.shape,
+                            Tint = c.tint, Glow = c.glow, Shape = c.shape, Yaw = c.yaw,
                         };
                         PlaceCellData(cell, pal, data);
+                        _loadedMaxCell = new Vector3i(Mathf.Max(_loadedMaxCell.X, cell.X),
+                            Mathf.Max(_loadedMaxCell.Y, cell.Y), Mathf.Max(_loadedMaxCell.Z, cell.Z));
                     }
                 }
 
@@ -798,6 +800,36 @@ namespace BlocksBeyondTheStars.Client
                 _status = string.Format(L("ui.ed.load_failed"), e.Message);
                 if (_statusLabel != null) _statusLabel.text = _status;
             }
+        }
+
+        /// <summary>Export the actual editable cells while retaining an imported hull's footprint, spawn,
+        /// lighting policy and station facing. Adding beyond its original extent can expand the hull.</summary>
+        private ExportLayoutJson BuildLayoutExport()
+        {
+            int maxX = 0, maxY = 0, maxZ = 0;
+            var layout = new ExportLayoutJson
+            {
+                preserveAuthoredFinishes = _loadedLayout?.preserveAuthoredFinishes ?? false,
+                spawn = _loadedLayout?.spawn,
+            };
+            foreach (var kv in _design)
+            {
+                var d = kv.Value;
+                layout.cells.Add(new ExportCellJson
+                {
+                    x = kv.Key.X, y = kv.Key.Y, z = kv.Key.Z,
+                    kind = string.IsNullOrEmpty(d.Kind) ? "block" : d.Kind, id = d.Id,
+                    tint = d.Tint, glow = d.Glow, shape = d.Shape, yaw = d.Yaw,
+                });
+                maxX = Mathf.Max(maxX, kv.Key.X);
+                maxY = Mathf.Max(maxY, kv.Key.Y);
+                maxZ = Mathf.Max(maxZ, kv.Key.Z);
+            }
+
+            layout.width = _loadedLayout != null && maxX <= _loadedMaxCell.X ? _loadedLayout.width : maxX + 1;
+            layout.height = _loadedLayout != null && maxY <= _loadedMaxCell.Y ? _loadedLayout.height : maxY + 1;
+            layout.length = _loadedLayout != null && maxZ <= _loadedMaxCell.Z ? _loadedLayout.length : maxZ + 1;
+            return layout;
         }
 
         /// <summary>Rebuilds the right-hand form (key/name + stats) so it reflects a freshly loaded design.</summary>

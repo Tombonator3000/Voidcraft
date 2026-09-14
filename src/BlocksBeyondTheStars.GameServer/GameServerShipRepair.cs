@@ -67,7 +67,7 @@ public sealed partial class GameServer
     /// a baseline cell is the block that should be rebuilt there.</summary>
     private SpaceStructure OwnShipDesignReference(string ownerId)
         => BuildShipStructureFrom("ship:" + ownerId, ownerId,
-            _content.GetShip(_ship.ShipType) ?? _content.GetShip("starter"), persistEdits: false);
+            _content.GetShip(_ship.ShipType) ?? _content.GetShip("starter"), persistEdits: false, _ship.StructureVersion);
 
     /// <summary>Missing design cells: baseline cells that are currently air, with the block the design wants there.</summary>
     private IEnumerable<(Vector3i Cell, BlockDefinition Block)> EnumerateShipRepairCells(SpaceStructure live, SpaceStructure design)
@@ -243,7 +243,7 @@ public sealed partial class GameServer
                 pool.Remove(new[] { new ItemAmount(item, 1) });
             }
 
-            CommitShipRepairCell(session, live, instance, cell, def.NumericId);
+            CommitShipRepairCell(live, design, instance, cell, def.NumericId);
             cellsRepaired++;
         }
 
@@ -312,19 +312,31 @@ public sealed partial class GameServer
             pool.Remove(new[] { new ItemAmount(item, 1) });
         }
 
-        CommitShipRepairCell(session, live, instance, cell, def.NumericId);
+        CommitShipRepairCell(live, design, instance, cell, def.NumericId);
         SendInventory(session);
         SendShipRepairStatus(session);
     }
 
     /// <summary>Writes a repaired cell into the live structure, persists it as a per-cell delta (same durable
     /// store EVA/interior edits use) and broadcasts it to the right audience (space instance or world).</summary>
-    private void CommitShipRepairCell(PlayerSession session, SpaceStructure live, SpaceInstance? instance, Vector3i cell, BlockId block)
+    private void CommitShipRepairCell(SpaceStructure live, SpaceStructure design, SpaceInstance? instance, Vector3i cell, BlockId block)
     {
-        live.Set(cell, block);
+        design.Mods.TryGetValue(cell, out var mod);
+        design.Shapes.TryGetValue(cell, out int shape);
+        live.Set(cell, block, mod.Tint, mod.Glow, shape);
         _repo.SetStructureBlock(live.Id, cell, block.Value);
 
-        var msg = new StructureBlockChanged { StructureId = live.Id, X = cell.X, Y = cell.Y, Z = cell.Z, Block = block.Value };
+        var msg = new StructureBlockChanged
+        {
+            StructureId = live.Id,
+            X = cell.X,
+            Y = cell.Y,
+            Z = cell.Z,
+            Block = block.Value,
+            Tint = mod.Tint,
+            Glow = mod.Glow,
+            Shape = shape,
+        };
         if (instance != null)
         {
             BroadcastToInstance(instance, msg);
