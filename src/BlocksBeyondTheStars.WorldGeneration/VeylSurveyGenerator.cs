@@ -13,7 +13,7 @@ namespace BlocksBeyondTheStars.WorldGeneration;
 /// This authored monument reuses voxel shapes and the persisted monument pipeline.</summary>
 public static class VeylSurveyGenerator
 {
-    public const int LatestVersion = 3;
+    public const int LatestVersion = 4;
     public const int BurialDepth = 6; // Version 0/1: preserve saved contact coordinates and cells.
     public const int VaultBurialDepth = 26;
     public static readonly Vector3i VaultSurfaceContact = new(8, 27, 3);
@@ -23,7 +23,7 @@ public static class VeylSurveyGenerator
     public static int BurialDepthFor(int geometryVersion) => geometryVersion switch
     {
         0 or 1 => BurialDepth,
-        2 or LatestVersion => VaultBurialDepth,
+        2 or 3 or LatestVersion => VaultBurialDepth,
         _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
     };
 
@@ -33,7 +33,7 @@ public static class VeylSurveyGenerator
         => geometryVersion switch
         {
             0 or 1 => BurialDepth + 4,
-            2 or LatestVersion => (x >= 10 && x <= 14 && z <= 27) || (x >= 6 && x <= 16 && z <= 4)
+            2 or 3 or LatestVersion => (x >= 10 && x <= 14 && z <= 27) || (x >= 6 && x <= 16 && z <= 4)
                 ? VaultBurialDepth + 4 : z == 27 && x >= 3 && x <= 14 ? 8 : 0,
             _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
         };
@@ -46,7 +46,8 @@ public static class VeylSurveyGenerator
         {
             0 or 1 => GenerateLegacy(content, surfaceBlock),
             2 => GenerateVault(content, surfaceBlock, interruptedBridge: false),
-            LatestVersion => GenerateVault(content, surfaceBlock, interruptedBridge: true),
+            3 => GenerateVault(content, surfaceBlock, interruptedBridge: true),
+            LatestVersion => GenerateVault(content, surfaceBlock, interruptedBridge: true, readableLighting: true),
             _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
         };
 
@@ -109,7 +110,8 @@ public static class VeylSurveyGenerator
     }
 
 
-    private static SettlementStructure GenerateVault(GameContent content, string surfaceBlock, bool interruptedBridge)
+    private static SettlementStructure GenerateVault(GameContent content, string surfaceBlock, bool interruptedBridge,
+        bool readableLighting = false)
     {
         const int Width = 25, Height = 45, Length = 57;
         ushort stone = content.GetBlock("stone")!.NumericId.Value;
@@ -138,7 +140,10 @@ public static class VeylSurveyGenerator
         void Signal(int x, int y, int z)
         {
             Set(x, y, z, rune);
-            modifiers[Index(x, y, z)] = (0x577B87, 0x237A8C);
+            // Propagated block light loses one level per cell. The original dark cyan only reached
+            // about four cells, leaving the vault silhouette and bridge unreadable in actual captures.
+            // Keep surface beacons restrained; brighter interior sources still use narrow rune apertures.
+            modifiers[Index(x, y, z)] = (0x577B87, readableLighting && y <= 26 ? 0x70C6DA : 0x237A8C);
         }
 
         // A narrow surface landing and a real 22 m descent keep the tall chamber underground. Each
@@ -240,6 +245,20 @@ public static class VeylSurveyGenerator
         }
         shapes[Index(12, 11, 50)] = ShapeCode.Pack(BlockShape.Pyramid, 0, 1);
         shapes[Index(12, 22, 50)] = ShapeCode.Pack(BlockShape.Pyramid, 0);
+        if (readableLighting)
+        {
+            // Recessed emitters preserve the walkable volume and expose both sides of the shortcut gap.
+            Set(11, 4, 34, warm);
+            Set(11, 4, 38, warm);
+            Set(8, 4, 44, warm);
+            Signal(12, 26, 46);
+            Signal(7, 26, 50);
+            Signal(17, 26, 50);
+            // Matte stone bands define the front edges of the suspended dark mass without making its
+            // whole surface emissive. These replace existing full cubes; collision and shape stay exact.
+            foreach (int y in new[] { 13, 20 })
+                foreach (int x in new[] { 11, 13 }) Set(x, y, 49, shell);
+        }
         var markers = new List<SettlementMarker>
         {
             new("survey_surface", VaultSurfaceContact),

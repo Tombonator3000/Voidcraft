@@ -83,12 +83,16 @@ Shader "BlocksBeyondTheStars/EquipmentSurface"
                 float3 sun = _Sc_Light.a > 0.5 ? _Sc_Light.rgb : float3(0.8, 0.86, 0.95);
                 float shadow = MainLightRealtimeShadow(TransformWorldToShadowCoord(i.wp));
                 float indoor = saturate(_Sc_Indoor);
-                // A cool diffuse fill and a gentle warm cabin bounce keep dark housings readable.
-                // Actual directional shadows and local lamps still determine the direct highlights.
+                // Directional hemisphere bounce keeps shadowed graphite distinct from rubber. Cabin
+                // ceiling bounce is warm, the lower bounce cooler; direct sun/shadows and lamps still
+                // describe the silhouette. This is irradiance multiplied by albedo, never an unlit floor.
                 float3 sky = _Sc_Sky.a > 0.5 ? _Sc_Sky.rgb : float3(0.18, 0.23, 0.30);
-                float3 ambient = float3(0.09, 0.115, 0.15) + min(sky, 0.8) * 0.22;
-                ambient = lerp(ambient, float3(0.26, 0.225, 0.18), indoor * 0.65);
-                float3 col = albedo * ambient * (0.78 + saturate(N.y) * 0.22);
+                float3 upperBounce = float3(0.18, 0.22, 0.28) + min(sky, 0.8) * 0.40;
+                float3 lowerBounce = float3(0.085, 0.10, 0.12) + min(sky, 0.8) * 0.18;
+                upperBounce = lerp(upperBounce, float3(0.85, 0.72, 0.55), indoor * 0.75);
+                lowerBounce = lerp(lowerBounce, float3(0.32, 0.35, 0.39), indoor * 0.75);
+                float3 ambient = lerp(lowerBounce, upperBounce, saturate(N.y * 0.5 + 0.5));
+                float3 col = albedo * ambient;
                 col += FinishLight(albedo, rough, metal, N, V, L, sun * shadow * 0.85);
                 float3 f0 = lerp(float3(0.04, 0.04, 0.04), albedo, metal);
                 float fresnel = pow(1.0 - saturate(dot(N, V)), 5.0);
@@ -240,12 +244,14 @@ Shader "BlocksBeyondTheStars/EquipmentSurface"
                 float3 sun = _Sc_Light.a > 0.5 ? _Sc_Light.rgb : float3(0.8, 0.86, 0.95);
                 float shadow = 1.0;
                 float indoor = saturate(_Sc_Indoor);
-                // A cool diffuse fill and a gentle warm cabin bounce keep dark housings readable.
-                // Actual directional shadows and local lamps still determine the direct highlights.
+                // Match the URP hemisphere bounce without flattening the albedo or direct lighting.
                 float3 sky = _Sc_Sky.a > 0.5 ? _Sc_Sky.rgb : float3(0.18, 0.23, 0.30);
-                float3 ambient = float3(0.09, 0.115, 0.15) + min(sky, 0.8) * 0.22;
-                ambient = lerp(ambient, float3(0.26, 0.225, 0.18), indoor * 0.65);
-                float3 col = albedo * ambient * (0.78 + saturate(N.y) * 0.22);
+                float3 upperBounce = float3(0.18, 0.22, 0.28) + min(sky, 0.8) * 0.40;
+                float3 lowerBounce = float3(0.085, 0.10, 0.12) + min(sky, 0.8) * 0.18;
+                upperBounce = lerp(upperBounce, float3(0.85, 0.72, 0.55), indoor * 0.75);
+                lowerBounce = lerp(lowerBounce, float3(0.32, 0.35, 0.39), indoor * 0.75);
+                float3 ambient = lerp(lowerBounce, upperBounce, saturate(N.y * 0.5 + 0.5));
+                float3 col = albedo * ambient;
                 col += FinishLight(albedo, rough, metal, N, V, L, sun * shadow * 0.85);
                 float3 f0 = lerp(float3(0.04, 0.04, 0.04), albedo, metal);
                 float fresnel = pow(1.0 - saturate(dot(N, V)), 5.0);

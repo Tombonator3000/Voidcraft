@@ -212,6 +212,97 @@ public sealed class ChunkStreamingTests : IDisposable
         Assert.InRange(farLayers, 1, 3); // far column: just the surface band (below+surface+above)
     }
 
+    [Theory]
+    [InlineData(false, false)] // ordinary interior
+    [InlineData(true, false)]  // longitude seam at X=0
+    [InlineData(false, true)]  // latitude seam at its negative canonical boundary
+    [InlineData(true, true)]   // both seams meet
+    public void RepeatedSweeps_KeepStreamedNeighborsAndSentSetAcrossBothSeams_WhileEvictingFarChunks(
+        bool longitudeSeam, bool latitudeSeam)
+    {
+        string name = $"stable_sweep_{longitudeSeam}_{latitudeSeam}";
+        using var repo = new SqliteWorldRepository(new SaveGamePaths(_root, name));
+        var config = new ServerConfig
+        {
+            WorldName = name,
+            Seed = 1,
+            StartPlanet = "rocky",
+            AutoSaveIntervalMinutes = 9999,
+            PlaceStarterShip = false,
+            PlaceSettlements = false,
+            PlaceRuins = false,
+            PlaceWrecks = false,
+            PlaceFactories = false,
+            PlaceBanditCamps = false,
+            PlaceChests = false,
+            PlaceVaults = false,
+            PlaceDataCubes = false,
+            PlaceMonuments = false,
+            ViewDistanceChunks = 1,
+            ChunkStreamPerTick = 64,
+            Rules = new GameRules
+            {
+                StoryId = "none",
+                CreatureAbundance = AlienActivity.Off,
+                AggressiveAliens = AlienActivity.Off,
+                PlanetEnemies = AlienActivity.Off,
+                Bandits = AlienActivity.Off,
+            },
+        };
+        var server = new SvGameServer(config, _content, new LoopbackServerTransport(new LoopbackLink()), repo);
+        server.Start();
+        try
+        {
+            var player = server.AddLocalPlayer("Stationary");
+            int x = longitudeSeam ? 0 : 20 * WorldConstants.ChunkSize;
+            int z = latitudeSeam ? -WorldConstants.LatitudePeriodFor(server.World.Circumference) / 2 : 0;
+            const int feetY = 80;
+            // A small stationary test foothold keeps the real void/entombment guard from moving the
+            // anchor. Streaming and eviction still execute through ordinary server ticks and sent-sets.
+            server.World.SetBlock(new Vector3i(x, feetY - 1, z), _content.GetBlock("stone")!.NumericId);
+            for (int y = feetY; y <= feetY + 2; y++)
+                server.World.SetBlock(new Vector3i(x, y, z), BlocksBeyondTheStars.Shared.Primitives.BlockId.Air);
+            var position = new Vector3f(x + 0.5f, feetY + 0.05f, z + 0.5f);
+            player.State.Position = position;
+            Assert.False(server.IsInVoidForTest(position));
+            Assert.False(server.IsEntombedForTest(position));
+            for (int i = 0; i < 20; i++) server.TickForTest(0.1); // fill before the first 10-second sweep
+
+            var center = WorldConstants.WorldToChunk(position.ToBlock());
+            var west = WorldConstants.CanonicalChunk(new ChunkCoord(center.X - 1, center.Y, center.Z), server.World.Circumference);
+            var north = WorldConstants.CanonicalChunk(new ChunkCoord(center.X, center.Y, center.Z - 1), server.World.Circumference);
+            Assert.Contains(west, player.SentChunks);
+            Assert.Contains(north, player.SentChunks);
+            var westData = server.World.GetOrLoadChunk(west);
+            var northData = server.World.GetOrLoadChunk(north);
+            var sentBefore = new System.Collections.Generic.HashSet<ChunkCoord>(player.SentChunks);
+            var farHorizontal = WorldConstants.CanonicalChunk(new ChunkCoord(center.X + 8, center.Y, center.Z), server.World.Circumference);
+            var farVertical = new ChunkCoord(center.X, center.Y + 8, center.Z);
+            Assert.DoesNotContain(farHorizontal, sentBefore);
+            Assert.DoesNotContain(farVertical, sentBefore);
+
+            for (int sweep = 0; sweep < 3; sweep++)
+            {
+                server.World.GetOrLoadChunk(farHorizontal);
+                server.World.GetOrLoadChunk(farVertical);
+                player.SentChunks.Add(farHorizontal);
+                player.SentChunks.Add(farVertical);
+                server.TickForTest(10.01);
+                Assert.Equal(position, player.State.Position);
+                Assert.True(server.World.IsChunkLoaded(west), "A visible western seam neighbor must not be swept away.");
+                Assert.True(server.World.IsChunkLoaded(north), "A visible latitude seam neighbor must not be swept away.");
+                Assert.Same(westData, server.World.GetOrLoadChunk(west));
+                Assert.Same(northData, server.World.GetOrLoadChunk(north));
+                Assert.True(sentBefore.SetEquals(player.SentChunks), "A stationary view must keep its sent-set, avoiding periodic full resends.");
+                Assert.False(server.World.IsChunkLoaded(farHorizontal), "The wrap fix must still evict genuinely distant surface chunks.");
+                Assert.False(server.World.IsChunkLoaded(farVertical), "Height must remain linear and contribute to eviction distance.");
+                Assert.DoesNotContain(farHorizontal, player.SentChunks);
+                Assert.DoesNotContain(farVertical, player.SentChunks);
+            }
+        }
+        finally { server.Stop(); }
+    }
+
     public void Dispose()
     {
         try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }

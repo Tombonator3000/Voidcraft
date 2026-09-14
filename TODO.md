@@ -31,7 +31,7 @@ Working branch: `feat/concept-visual-upgrade`, based on the playable fork at
 but is not the canonical playable baseline. Keep existing playable story and graphics work.
 Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md).
 
-**Implemented in the working tree; visual and performance acceptance pending**
+**Implemented in checkpoint `ad1a681`; visual and performance acceptance pending**
 
 - Independent physical height, roughness, metal and emission apertures for 27 common surfaces, including
   basalt, ceramic ship walls, industrial floors, stone/runes, ice/crystal, lamps and quiet soil/grass. Shared 128-pixel atlas
@@ -100,9 +100,25 @@ Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md
   95 selected server cases, 205 Client.Tests and full format verification (0 of 674 files changed). Sixth
   player compiled cleanly; four new EditMode failures exposed an authored-opacity defect and incomplete
   test fixture setup. Corrections passed focused regressions. Seventh player is clean and all 86 Unity
-  cases pass, zero skips. Its real journey, new captures and valid performance samples are pending.
+  cases pass, zero skips. Its third real journey verifies hatch exit, scanner selection and 13.4 m of
+  walking, then stops at a terrain obstacle the bounded local planner cannot route around. Input
+  isolation and graceful shutdown pass; complete expedition/reload, new captures and valid performance
+  samples remain pending.
 - A new derivative concept sheet was generated with built-in ChatGPT only; its prompt and provenance
   are retained with the earlier references. A specific image model version was not exposed by the tool.
+- Seventh rocky capture shows the actual Veyl vault with all terrain work complete; its major forms
+  exist but light separation and route readability need correction. Default/rocky home and terrain
+  shots mostly had pending work. The input-isolated idle run held the camera/body fixed but revealed
+  ten-second redundant seam chunk eviction/resend bursts. No accepted performance gain yet.
+- Broad PR CI found five Veyl placement-guarantee failures on rough/wet planet seeds. The next candidate
+  corrects placement, seam eviction, navigation detours, aimed station hints, equipment/casing
+  readability, versioned vault lighting, and material/comfort-aware mining feedback. Eighth-source clean
+  CI build has zero warnings/errors; 135 selected server cases and all 205 Client.Tests pass, zero skips.
+  This includes all five previously failing planet seeds, supported half-step approaches, persisted
+  reservations, player-edit protection and repeated real streaming sweeps. Full restored format passes
+  with zero changes across 677 files. The full eighth Linux player builds without C#/shader diagnostics
+  and all 100 Unity cases pass, zero skipped; source/payload hashes still match. Runtime journey,
+  settled visual/performance checks and cloud revalidation remain pending.
 - [Validation record](docs/developer/CONCEPT_VALIDATION_2026-09-14.md) distinguishes candidates and evidence.
 
 **Required work still open — first ten-minute sequence is a checkpoint, not the whole request**
@@ -123,8 +139,12 @@ Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md
 - [ ] Measure the same candidate/preset on the named hardware: p95 ≤16.67 ms, p99 <20 ms, report stalls
   >50 ms, memory and representative traversal/building/ship/ruin costs. No performance pass yet.
 - [ ] Demonstrate the actual new-player journey and restart/continuation, separately from scripted setup.
-- [ ] Preserve a verified checkpoint, update player documentation and prepare an unmerged pull request.
-  Produce any distributable playtest through the project's cloud workflow with accurate opening steps.
+- [x] Preserve verified checkpoint `ad1a681` and updated player documentation; open unmerged
+  [draft PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10) (2026-09-14).
+- [ ] Produce the distributable playtest through the project's cloud workflow with accurate opening
+  steps. [Run 34882893539](https://github.com/Tombonator3000/Voidcraft/actions/runs/34882893539) was
+  dispatched for `ad1a681`; validation failed on five placement cases (1830/1835 server cases passed),
+  so Windows/Linux packaging was skipped. A corrected checkpoint must pass before distribution.
 
 ---
 

@@ -618,6 +618,7 @@ namespace BlocksBeyondTheStars.Client
 
         private void OnBlockApplied(Vector3i pos, BlockId oldId, BlockId newId)
         {
+            if (oldId == newId) return; // Dye/glow updates are not mining or placement impacts.
             // Fluid-sim steps (#655): the server broadcasts EVERY spread/drain cell as a block change, so
             // flowing water used to hammer the place-knock (and draining water the mining crunch) several
             // times a second. Water/lava transitions play no per-cell cue — the looping fluid bed IS the
@@ -641,9 +642,18 @@ namespace BlocksBeyondTheStars.Client
                 : new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
             if (newId.Value == 0)
             {
-                // Mined → a random material variant for variety (material-accurate later).
-                string[] v = { "mine_stone", "mine_metal", "mine_crystal", "mine_dirt" };
-                At(v[_rng.Next(v.Length)], at);
+                // Select a matching surface family; random metal clangs on soil obscure hit feedback.
+                var material = Game?.Content?.BlockById(oldId);
+                string cue;
+                if (oldKey.Contains("crystal") || oldKey.Contains("glass") || oldKey == "ice")
+                    cue = "mine_crystal";
+                else if (material?.Category == "flora" || oldKey is "dirt" or "mud" or "sand" or "snow" or "grass" or "ash")
+                    cue = "mine_dirt";
+                else if (material?.Metal >= 0.3f || material?.Category is "machine" or "door"
+                    || (BlockSurfaceLibrary.Contains(oldKey) && BlockSurfaceLibrary.Sample(oldKey, 0.43f, 0.57f).Metallic >= 0.3f))
+                    cue = "mine_metal";
+                else cue = "mine_stone";
+                At(cue, at);
             }
             else
             {

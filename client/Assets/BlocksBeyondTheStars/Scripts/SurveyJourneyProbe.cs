@@ -24,6 +24,11 @@ namespace BlocksBeyondTheStars.Client
             ReturnWalk, HomeDoorOpen, HomeEnter, HomeReply, UseReward, RewardReply, ReloadObserve }
         private readonly JourneyInputSource _input = new();
         private readonly List<Vector3> _path = new();
+        private JourneyWalkPlanner.Memory _navigationMemory;
+        private JourneyWalkPlanner.Search _navigationSearch;
+        private JourneyWalkPlanner.Report _navigationReport;
+        private Vector3 _plannedGoal;
+        private bool _navigationGoalSet, _plannedMatchHeight;
         private readonly List<NetDoor> _doors = new();
         private readonly Dictionary<BaseInputModule, bool> _nativeUiModules = new();
         private EventSystem _isolatedEventSystem;
@@ -63,6 +68,7 @@ namespace BlocksBeyondTheStars.Client
             public bool focused, runInBackground, inputIsolated, nativeUiInputSuspended;
             public Vector3 position, authoritativePosition, navigationGoal, nextWaypoint, hatchPosition;
             public int waypointCount;
+            public JourneyWalkPlanner.Report navigation;
             public Vector2 move, look;
             public bool aboard, primaryDown, primaryHeld, secondaryDown, jumpDown;
             public int slotOneBased;
@@ -455,19 +461,41 @@ namespace BlocksBeyondTheStars.Client
         {
             if (_game.MenuOpen) return false; // modal input must never be forced through the controller
             Vector3 pos = _player.transform.position;
+            if (!_navigationGoalSet || Vector3.Distance(_plannedGoal, goal) > 0.5f || _plannedMatchHeight != matchHeight)
+            {
+                _navigationGoalSet = true; _plannedGoal = goal; _plannedMatchHeight = matchHeight;
+                _navigationMemory = new JourneyWalkPlanner.Memory();
+                _navigationSearch = null; _navigationReport = null; _path.Clear(); _nextPlan = 0;
+            }
+            _navigationMemory.Observe(pos); // measured locomotion, never the planned route length
+            if (_navigationMemory.Walked >= 256f)
+            { Finish("failed", "navigation_goal_distance_budget_exhausted", 1); return false; }
             if (HorizontalDistance(pos, goal) <= reach && (!matchHeight || Mathf.Abs(pos.y - goal.y) < 1.25f)) return true;
             if (Vector3.Distance(pos, _progressPosition) > 0.2f)
             { _progressPosition = pos; _lastProgress = Time.realtimeSinceStartupAsDouble; }
-            if (Time.realtimeSinceStartupAsDouble - _lastProgress > 12)
-            { Finish("failed", "physical_navigation_stalled", 1); return false; }
             while (_path.Count > 0 && HorizontalDistance(pos, _path[0]) < 0.4f && Mathf.Abs(pos.y - _path[0].y) < 1.25f) _path.RemoveAt(0);
-            if ((_path.Count == 0 || Time.realtimeSinceStartupAsDouble - _lastProgress > 3) && Time.realtimeSinceStartupAsDouble >= _nextPlan)
+            if (_navigationSearch == null && (_path.Count == 0 || Time.realtimeSinceStartupAsDouble - _lastProgress > 3)
+                && Time.realtimeSinceStartupAsDouble >= _nextPlan)
             {
                 _nextPlan = Time.realtimeSinceStartupAsDouble + 1.5;
                 _path.Clear();
-                _path.AddRange(JourneyWalkPlanner.Plan(_player, _capsule, goal));
-                Log("navigation_plan", "waypoints=" + _path.Count);
+                _navigationSearch = new JourneyWalkPlanner.Search(_player, _capsule, goal, reach, matchHeight, _navigationMemory);
+                _navigationReport = _navigationSearch.Diagnostics;
+                Log("navigation_search", "observed_physics");
             }
+            if (_navigationSearch != null)
+            {
+                _navigationSearch.Advance(32); // bounded work per frame; no movement while planning
+                if (!_navigationSearch.Done) return false;
+                _path.AddRange(_navigationSearch.Route);
+                Log("navigation_plan", "waypoints=" + _path.Count + ":" + _navigationReport.status);
+                _navigationSearch = null;
+                if (_path.Count == 0)
+                { Finish("failed", "navigation_" + _navigationReport.status, 1); return false; }
+                _progressPosition = pos; _lastProgress = Time.realtimeSinceStartupAsDouble;
+            }
+            if (Time.realtimeSinceStartupAsDouble - _lastProgress > 12)
+            { Finish("failed", "physical_navigation_stalled", 1); return false; }
             if (_path.Count == 0) return false;
             Vector3 target = _path[0];
             Aim(new Vector3(target.x, _player.Camera.transform.position.y, target.z), ref input);
@@ -550,6 +578,7 @@ namespace BlocksBeyondTheStars.Client
             _step = step;
             _deadline = Time.realtimeSinceStartupAsDouble + seconds;
             _path.Clear(); _nextPlan = 0;
+            _navigationGoalSet = false; _navigationSearch = null; _navigationReport = null;
             _progressPosition = _player != null ? _player.transform.position : default;
             _lastProgress = Time.realtimeSinceStartupAsDouble;
             Log("checkpoint_enter", null);
@@ -577,6 +606,7 @@ namespace BlocksBeyondTheStars.Client
                 authoritativeStateAgeSeconds = _lastState == null ? -1 : Time.realtimeSinceStartupAsDouble - _lastStateAt,
                 navigationGoal = _goal, nextWaypoint = _path.Count == 0 ? default : _path[0], waypointCount = _path.Count,
                 hatchPosition = _door == null ? default : DoorPosition(),
+                navigation = kind is "navigation_search" or "navigation_plan" or "finished" ? _navigationReport : null,
                 selectedItem = _game?.ItemInSlot(_game.SelectedHotbarSlot), aboard = _game != null && _game.Aboard,
                 move = frame.Move, look = frame.Look, primaryDown = frame.PrimaryDown, primaryHeld = frame.PrimaryHeld,
                 secondaryDown = frame.SecondaryDown, jumpDown = frame.JumpDown, slotOneBased = frame.SlotOneBased,

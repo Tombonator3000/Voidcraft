@@ -132,9 +132,24 @@ public sealed class StructurePlacementRecord
     public int Z { get; set; }
     /// <summary>Zero retains the original geometry of saves written before versioned structures.</summary>
     public int GeometryVersion { get; set; }
+    /// <summary>Optional full terrain/approach reservation. Missing values retain the original template
+    /// footprint; stamped cells still live only in persisted world deltas.</summary>
+    public StructureReservationBounds? Reservation { get; set; }
     public bool OnIsland { get; set; }
     public string Seat { get; set; } = "legacy";      // seat style: legacy|flat|slope|shelf|stilts|lava|island|buried|wellhead
     public string Name { get; set; } = string.Empty;  // display name (derives from rng draws AFTER the search, so it must be pinned too)
+}
+
+/// <summary>Property-based JSON bounds for a structure's complete terrain cut/fill and approach.
+/// Nullable coordinates let readers reject partial/corrupt objects and retain the saved template footprint.</summary>
+public sealed class StructureReservationBounds
+{
+    public int? MinX { get; set; }
+    public int? MinY { get; set; }
+    public int? MinZ { get; set; }
+    public int? MaxX { get; set; }
+    public int? MaxY { get; set; }
+    public int? MaxZ { get; set; }
 }
 
 /// <summary>One player claim over a spawned structure: a stable per-world key, the owner, and a display name.

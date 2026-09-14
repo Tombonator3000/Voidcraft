@@ -50,6 +50,9 @@ namespace BlocksBeyondTheStars.Client
         private string _startPlanet; // optional -startPlanet selects the world for the full concept sequence
         private bool _concepts; // additional actual-player material/site views, with scripted pose setup
         private bool _credits;  // when true (-captureCredits), capture ONLY the credits screen (credits.png) and quit
+        private JourneyInputSource _input;
+        private int _failedViews;
+        private bool _quitting;
 
         /// <summary>Self-install at startup when capture is requested. Reload-safe: reads config fresh from the
         /// command line (player/headless) or EditorPrefs (editor menu) rather than relying on static state.</summary>
@@ -137,8 +140,41 @@ namespace BlocksBeyondTheStars.Client
 
         private void Start() => StartCoroutine(Run());
 
+        private void Update()
+        {
+            if (_input == null || _quitting) return;
+            if (!InputMap.OwnsVerificationInput(_input))
+            {
+                Debug.LogError("[Capture] Exclusive gameplay input ownership was lost.");
+                StopAllCoroutines();
+                Quit(3);
+                return;
+            }
+            _input.Publish(default);
+            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.JoystickButton1))
+            {
+                Debug.LogWarning("[Capture] Canceled through native Escape/controller cancel.");
+                StopAllCoroutines();
+                Quit(3);
+            }
+        }
+
+        private void OnDisable()
+        {
+            _input?.Clear();
+            if (_input != null) InputMap.DetachVerificationInput(_input);
+        }
+
         private IEnumerator Run()
         {
+            _input = new JourneyInputSource();
+            if (!InputMap.AttachCaptureInput(_input))
+            {
+                Debug.LogError("[Capture] Could not acquire exclusive gameplay input.");
+                Quit(3);
+                yield break;
+            }
+            _input.Publish(default);
             Screen.SetResolution(ShotWidth, ShotHeight, FullScreenMode.FullScreenWindow);
 
             var shell = FindAnyObjectByType<AppShell>();
@@ -333,6 +369,7 @@ namespace BlocksBeyondTheStars.Client
             if (boot.CinematicCameraActive || boot.VegaPrologueActive)
             {
                 Debug.LogWarning("[Capture] Home views unavailable: cinematic still owns the camera.");
+                _failedViews++;
                 yield break;
             }
             LandedShipModel home = null;
@@ -351,13 +388,19 @@ namespace BlocksBeyondTheStars.Client
                     || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 2, 0)).IsAir)
                 {
                     Debug.LogWarning($"[Capture] Home view {view} unavailable: observed aisle is occupied.");
+                    _failedViews++;
                     continue;
                 }
                 Vector3 feet = boot.ScenePos(home.Origin.X + x + 0.5f, home.Origin.Y + 1.15f,
                     home.Origin.Z + z + 0.5f);
                 pc.SetCapturePose(feet, view == 0 ? 0f : 180f, 4f);
                 yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
-                if (!pc.IsCaptureGrounded) continue;
+                if (!pc.IsCaptureGrounded)
+                {
+                    Debug.LogWarning($"[Capture] Home view {view} unavailable: no grounded capsule at {pc.transform.position} (requested {feet}).");
+                    _failedViews++;
+                    continue;
+                }
                 yield return new WaitForSecondsRealtime(PoseSettle);
                 yield return Capture(Path.Combine(dir, view == 0 ? "ship_home_forward.png" : "ship_home_aft.png"));
             }
@@ -377,6 +420,7 @@ namespace BlocksBeyondTheStars.Client
             if (site == null)
             {
                 Debug.LogWarning("[Capture] Veyl view unavailable: no uncompleted site on this world.");
+                _failedViews++;
                 yield break;
             }
             var stage = new Vector3(boot.SceneX(site.X) - 15f, boot.PlayerPosition.y,
@@ -406,6 +450,7 @@ namespace BlocksBeyondTheStars.Client
             if (!found)
             {
                 Debug.LogWarning("[Capture] Veyl view unavailable: no streamed safe ground at the approach.");
+                _failedViews++;
                 yield break;
             }
             pc.SetCapturePose(ground, 45f, 8f);
@@ -413,6 +458,7 @@ namespace BlocksBeyondTheStars.Client
             if (!pc.IsCaptureGrounded || pc.IsHeadUnderwater() || boot.Health <= 0f)
             {
                 Debug.LogWarning("[Capture] Veyl view skipped: player did not settle alive on dry ground.");
+                _failedViews++;
                 yield break;
             }
             boot.SetCaptureEnvironment(0.38f);
@@ -463,23 +509,24 @@ namespace BlocksBeyondTheStars.Client
             if (rows < 16)
             {
                 Debug.LogWarning($"[Capture] Vault interior unavailable: only {rows} descending rows observed.");
+                _failedViews++;
                 yield break;
             }
             Vector3 candidate = (Vector3)stair + (Vector3)direction * 5f + new Vector3(0.5f, 0.15f, 0.5f);
             if (!TryCaptureFloor(pc, candidate + Vector3.up * 2f, 3f, out var hit))
             {
                 Debug.LogWarning("[Capture] Vault interior unavailable: no observed floor collider at the landing.");
+                _failedViews++;
                 yield break;
             }
             float yaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
             pc.SetCapturePose(hit.point + Vector3.up * 0.15f, yaw, -10f);
-            yield return WaitUntil(() => pc.IsCaptureGrounded && boot.PendingMeshCount == 0
-                && !boot.CinematicCameraActive && !boot.VegaPrologueActive, 90f);
-            if (!pc.IsCaptureGrounded || pc.IsHeadUnderwater() || boot.PendingMeshCount != 0
-                || boot.CinematicCameraActive || boot.VegaPrologueActive)
+            yield return WaitUntil(() => pc.IsCaptureGrounded, 12f);
+            if (!pc.IsCaptureGrounded || pc.IsHeadUnderwater())
             {
                 Debug.LogWarning($"[Capture] Vault interior unavailable: grounded={pc.IsCaptureGrounded}, "
                     + $"pendingMeshes={boot.PendingMeshCount}.");
+                _failedViews++;
                 yield break;
             }
             yield return new WaitForSecondsRealtime(PoseSettle);
@@ -630,6 +677,47 @@ namespace BlocksBeyondTheStars.Client
 
         private IEnumerator Capture(string path)
         {
+            var boot = FindAnyObjectByType<GameBootstrap>();
+            if (_concepts && boot != null && !boot.InSpace)
+            {
+                // Give the actual streamed world a quiet interval before assessing missing forms or
+                // materials. A timeout is an unavailable view, never an apparently completed capture.
+                float started = Time.realtimeSinceStartup, quietSince = -1f, nextRecord = 0f;
+                int epoch = boot.WorldEpoch;
+                var evidence = new System.Text.StringBuilder();
+                bool ready = false;
+                while (Time.realtimeSinceStartup - started < 120f)
+                {
+                    float now = Time.realtimeSinceStartup;
+                    bool quiet = boot.WorldReady && boot.World != null && boot.World.Chunks.Count > 0 && boot.PendingMeshCount == 0
+                        && boot.ChunkMeshFailureCount == 0 && boot.TimeSinceLastChunk >= 0.6f
+                        && !boot.CinematicCameraActive && !boot.VegaPrologueActive
+                        && InputMap.OwnsVerificationInput(_input);
+                    if (boot.WorldEpoch != epoch) { quietSince = -1f; epoch = boot.WorldEpoch; }
+                    if (!quiet) quietSince = -1f;
+                    else if (quietSince < 0f) quietSince = now;
+                    ready = quietSince >= 0f && now - quietSince >= 1.5f;
+                    if (now - started >= nextRecord || ready)
+                    {
+                        evidence.AppendLine($"elapsed={now - started:F2} pending={boot.PendingMeshCount} "
+                            + $"dirty={boot.DirtyChunkCount} building={boot.MeshBuildsInFlight} uploading={boot.PendingMeshUploads} "
+                            + $"baking={boot.ColliderBakesInFlight} assigning={boot.PendingColliderAssignments} "
+                            + $"failures={boot.ChunkMeshFailureCount} epoch={epoch} ready={ready} "
+                            + $"player={boot.PlayerPosition} cinematic={boot.CinematicCameraActive} prologue={boot.VegaPrologueActive}");
+                        nextRecord = now - started + 1f;
+                    }
+                    if (ready) break;
+                    yield return null;
+                }
+                evidence.AppendLine($"passed={ready}; scripted pose and visual environment; not a gameplay journey.");
+                File.WriteAllText(Path.ChangeExtension(path, ".readiness.txt"), evidence.ToString());
+                if (!ready)
+                {
+                    _failedViews++;
+                    Debug.LogWarning($"[Capture] Skipped {path}: scene did not settle before the capture deadline.");
+                    yield break;
+                }
+            }
             // Never catch the VEGA onboarding/greeting dialog in a frame — a fresh world queues her intro
             // lines right at spawn. (No-op on the menu, where no panel exists yet.)
             FindAnyObjectByType<VegaPanel>()?.DismissSpeechForCapture();
@@ -650,6 +738,7 @@ namespace BlocksBeyondTheStars.Client
             }
             catch (Exception e)
             {
+                _failedViews++;
                 Debug.LogWarning($"[Capture] failed {path}: {e.Message}");
             }
             finally
@@ -716,6 +805,9 @@ namespace BlocksBeyondTheStars.Client
 
         private void Quit(int code)
         {
+            _quitting = true;
+            if (code == 0 && _failedViews > 0) code = 2;
+            OnDisable();
 #if UNITY_EDITOR
             if (_headless)
             {

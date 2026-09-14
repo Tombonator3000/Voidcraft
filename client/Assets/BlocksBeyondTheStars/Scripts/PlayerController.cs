@@ -1249,20 +1249,20 @@ namespace BlocksBeyondTheStars.Client
             Game.Network.SendRepairWreck(t.x, t.y, t.z, item);
         }
 
-        private void HandleStations()
+        internal void RefreshStationPrompt()
         {
-            // Prefer the station you're looking at; fall back to the nearest one you're standing by. (Pure
-            // proximity made a cramped ship always read as the central station, "whatever you looked at".)
+            // The prompt and Interact use the same aimed fixture/marker. Falling back to a nearby station
+            // made an aft hatch say "Cockpit", and could select a console behind an occluding wall.
             Game.NearbyStation = Game.LookedStationType(Camera, Reach);
-            if (string.IsNullOrEmpty(Game.NearbyStation))
-            {
-                Game.NearbyStation = Game.NearestStationType(transform.position, 3f);
-            }
-
             if (string.IsNullOrEmpty(Game.NearbyStation) && Game.NearVendor)
             {
                 Game.NearbyStation = "market"; // a settlement/station vendor → "trade" prompt + E opens the market
             }
+        }
+
+        private void HandleStations()
+        {
+            RefreshStationPrompt();
 
             if (!InputMap.Down(InputAction.Interact))
             {

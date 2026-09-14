@@ -788,11 +788,19 @@ namespace BlocksBeyondTheStars.Client
             }
 
             string best = string.Empty;
-            float bestSq = 1.6f * 1.6f; // the hit must land on (or right next to) a station tile
+            float bestSq = float.PositiveInfinity;
             foreach (var s in Stations)
             {
                 float dx = (float)WorldConstants.WrapDeltaX(s.X - hit.point.x, Circumference), dy = s.Y - hit.point.y;
                 float dz = (float)WorldConstants.WrapDeltaZ(s.Z - hit.point.z, Circumference);
+                // A physical fallback must hit the actual one-cell marker, not a nearby wall, floor or
+                // window. The collider-free detailed housing above it was already tested separately.
+                const float edgeTolerance = 0.002f;
+                if (Mathf.Abs(dx) > 0.5f + edgeTolerance || Mathf.Abs(dz) > 0.5f + edgeTolerance
+                    || dy > edgeTolerance || dy < -1f - edgeTolerance)
+                {
+                    continue;
+                }
                 float d = dx * dx + dy * dy + dz * dz;
                 if (d < bestSq)
                 {

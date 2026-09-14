@@ -573,7 +573,6 @@ public sealed partial class GameServer
                 if (_config.PlaceMonuments)
                 {
                     StampMonuments(); // eroded rune relics (unprotected) — the only surface feature airless bodies get
-                    StampVeylSurvey();
                 }
 
                 if (_config.PlaceFactories)
@@ -602,6 +601,10 @@ public sealed partial class GameServer
                 {
                     StampChests(); // rare standalone treasure caches (0-N per body)
                 }
+
+                // New survey terrain adapts around every existing content footprint. Pinned survey
+                // reservations are available from metadata before any of the searches above run.
+                if (_config.PlaceMonuments) StampVeylSurvey();
             }
         }
 

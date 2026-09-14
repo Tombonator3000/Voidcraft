@@ -3,6 +3,7 @@
 // This file is part of Blocks Beyond the Stars. See LICENSE for the full AGPL-3.0 text.
 using System.Reflection;
 using BlocksBeyondTheStars.Client;
+using BlocksBeyondTheStars.Shared.World;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -76,6 +77,54 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             }
 
             AssertValidGeometry(fixture);
+        }
+
+        [Test]
+        public void LegacyMarkerCasingRequiresTheMatchingUnshapedBlock()
+        {
+            var predicate = typeof(StationDecorView).GetMethod("UsesMarkerCasing", BindingFlags.Static | BindingFlags.NonPublic);
+            bool Cased(string type, string key, int shape) => (bool)predicate.Invoke(null, new object[] { type, key, shape });
+            Assert.IsTrue(Cased("medbay", "ice", 0));
+            Assert.IsTrue(Cased("quarters", "carbon", 0));
+            Assert.IsTrue(Cased("workshop", "stone", 0));
+            Assert.IsFalse(Cased("medbay", "iron_wall", 0), "An edited block keeps its own material.");
+            Assert.IsFalse(Cased("workshop", null, 0), "Missing or late marker data cannot grow a solid-looking base.");
+            Assert.IsTrue(Cased("workshop", "stone", ShapeCode.Pack(BlockShape.Cube, 1)),
+                "Rotating a cube does not change its physical footprint.");
+            Assert.IsFalse(Cased("workshop", "stone", ShapeCode.Pack(BlockShape.Stairs, 1)),
+                "A shaped marker cannot be disguised as a full cube.");
+            Assert.IsFalse(Cased("cockpit", "data_cache", 0), "Keep the authored cockpit housing and its status aperture.");
+        }
+
+        [TestCase("medbay")]
+        [TestCase("quarters")]
+        [TestCase("workshop")]
+        public void CasedMarkerMatchesItsExistingCubeWithoutAddingCollisionOrDraws(string type)
+        {
+            var builder = typeof(StationDecorView).GetMethod("BuildFixture", BindingFlags.Static | BindingFlags.NonPublic);
+            var first = (GameObject)builder.Invoke(null, new object[] { _root.transform, type, true });
+            var second = (GameObject)builder.Invoke(null, new object[] { _root.transform, type, true });
+            Assert.IsEmpty(first.GetComponentsInChildren<Collider>());
+            Assert.LessOrEqual(first.GetComponentsInChildren<Renderer>().Length, 2);
+            var mesh = first.GetComponentInChildren<MeshFilter>().sharedMesh;
+            Assert.AreSame(mesh, second.GetComponentInChildren<MeshFilter>().sharedMesh);
+            Assert.That(mesh.bounds.min.y, Is.EqualTo(-1.001f).Within(0.0001f));
+            foreach (var vertex in mesh.vertices)
+            {
+                Assert.That(vertex.x, Is.InRange(-0.502f, 0.502f));
+                Assert.That(vertex.z, Is.InRange(-0.502f, 0.502f));
+                Assert.That(vertex.y, Is.InRange(-1.002f, 0.92f));
+                if (vertex.y > 0.002f)
+                {
+                    Assert.That(vertex.x, Is.InRange(-0.48f, 0.48f));
+                    Assert.That(vertex.z, Is.InRange(-0.48f, 0.48f));
+                }
+            }
+            AssertValidGeometry(first);
+            Object.DestroyImmediate(first);
+            Assert.IsTrue(mesh != null);
+            Object.DestroyImmediate(second);
+            Assert.IsTrue(mesh == null);
         }
 
         [Test]

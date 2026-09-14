@@ -1118,6 +1118,7 @@ public sealed partial class GameServer
     /// margin, wrapping on longitude.</summary>
     private bool OverlapsFootprint(int cx, int cz, int hw, int hl, List<(int Cx, int Cz, int Hw, int Hl)> rects, int margin)
     {
+        if (OverlapsPinnedVeyl(cx, cz, hw, hl, margin)) return true;
         int circ = _world.Circumference;
         foreach (var r in rects)
         {
@@ -1136,6 +1137,7 @@ public sealed partial class GameServer
     /// used by other surface stampers (wrecks/vaults/data cubes) to keep clear of settlements.</summary>
     public bool OverlapsAnySettlement(int x, int z, int halfExtent = 0)
     {
+        if (OverlapsPinnedVeyl(x, z, halfExtent, halfExtent, SettlementCollisionMargin)) return true;
         int circ = _world.Circumference;
         foreach (var s in _settlements)
         {

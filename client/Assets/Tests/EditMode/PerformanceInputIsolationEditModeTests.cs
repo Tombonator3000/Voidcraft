@@ -8,8 +8,9 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
 {
     public sealed class PerformanceInputIsolationEditModeTests
     {
-        [Test]
-        public void PerformanceLeaseExcludesLegacyMovement_AndOnlyItsOwnerCanReleaseIt()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CaptureAndPerformanceLeaseExcludeLegacyMovement_AndOnlyTheirOwnerCanRelease(bool capture)
         {
             var owner = new JourneyInputSource();
             var other = new JourneyInputSource();
@@ -17,10 +18,11 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             try
             {
                 InputMap.ScriptedMove = Vector2.one;
-                Assert.IsTrue(InputMap.AttachPerformanceInput(owner));
+                Assert.IsTrue(capture ? InputMap.AttachCaptureInput(owner) : InputMap.AttachPerformanceInput(owner));
                 Assert.IsTrue(InputMap.OwnsVerificationInput(owner));
                 Assert.IsFalse(InputMap.AttachVerificationInput(other));
                 Assert.IsFalse(InputMap.AttachPerformanceInput(other));
+                Assert.IsFalse(InputMap.AttachCaptureInput(other));
                 Assert.AreEqual(0f, InputMap.MoveX());
                 Assert.AreEqual(0f, InputMap.MoveY(), "An idle lease must exclude the legacy additive walk input.");
                 Assert.AreEqual(-1, InputMap.HotbarSlotDown());

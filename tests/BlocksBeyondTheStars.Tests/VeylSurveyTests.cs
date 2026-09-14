@@ -209,6 +209,30 @@ public sealed class VeylSurveyTests : IDisposable
     }
 
     [Fact]
+    public void CurrentVault_LightsTheGapAndAnchor_WithoutChangingVersionThreeCollisionOrMarkers()
+    {
+        var previous = VeylSurveyGenerator.Generate(_content, "stone", geometryVersion: 3);
+        var current = VeylSurveyGenerator.Generate(_content, "stone");
+        for (int x = 0; x < previous.Width; x++)
+            for (int y = 0; y < previous.Height; y++)
+                for (int z = 0; z < previous.Length; z++)
+                {
+                    Assert.Equal(previous.Get(x, y, z) == 0, current.Get(x, y, z) == 0);
+                    Assert.Equal(previous.GetShape(x, y, z), current.GetShape(x, y, z));
+                }
+        Assert.Equal(previous.Markers.Select(m => (m.Type, m.LocalPos)),
+            current.Markers.Select(m => (m.Type, m.LocalPos)));
+        Assert.Equal((0x577B87, 0x237A8C), previous.GetModifier(12, 16, 48));
+        Assert.Equal((0x577B87, 0x70C6DA), current.GetModifier(12, 16, 48));
+        Assert.Equal(previous.GetModifier(19, 32, 9), current.GetModifier(19, 32, 9));
+        var warm = _content.GetBlock("strip_light_warm")!.NumericId.Value;
+        Assert.Equal(warm, current.Get(11, 4, 34));
+        Assert.Equal(warm, current.Get(11, 4, 38));
+        Assert.NotEqual(warm, previous.Get(11, 4, 34));
+        Assert.Equal(0, current.Get(11, 4, 35)); // Light never fills the construction challenge.
+    }
+
+    [Fact]
     public void BridgeShortcut_UsesOrdinaryReachAndMaterials_AndPersistsAcrossReload()
     {
         var server = Start(out var repo, out var client);
@@ -254,6 +278,8 @@ public sealed class VeylSurveyTests : IDisposable
     [InlineData(1, true)]
     [InlineData(2, false)]
     [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(3, true)]
     public void PinnedSite_RetainsMarkersExcavationAndRepairAcrossVersionedLoad(int version, bool wrap)
     {
         var initial = Start(out var repo, out var client, story: false, ships: false);

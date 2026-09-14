@@ -84,7 +84,7 @@ Last updated: 2026-08-11.
 | **R** | Repair the targeted wreck breach with the selected hotbar block (see §5 → Wrecks); with a **shaped block, furniture, ladder or stairs** selected: rotate its placement orientation (**Shift+R** cycles backwards — see §5 → Craftable block shapes) |
 | **L** | Toggle the suit headlamp (requires a `suit_lamp`) |
 | **G** | Loot the nearest container |
-| **E** | Use a nearby ship/station tile (cockpit, workshop, cargo, medbay, …); **trade with a vendor** (opens the Market); **board your hover speeder**; **beam** from a teleporter pad you're standing on |
+| **E** | Use the ship/station fixture under your crosshair (cockpit, workshop, cargo, medbay, …); **trade with a nearby vendor** (opens the Market); **board your hover speeder**; **beam** from a teleporter pad you're standing on |
 | **X** | Pack up (stow) a nearby deployed hover speeder back into its item |
 | **T** | Send a trade request to a nearby player |
 | **K** | Send a dock request to a nearby player |
@@ -100,6 +100,8 @@ Last updated: 2026-08-11.
 | **Esc** | Close the current screen; if no game screen is open, show the leave-game confirmation |
 
 Interaction reach is ~6 m (extended by reach equipment).
+Ship station hints follow the fixture or its supporting marker that you actually aim at. Looking at an
+empty doorway or wall does not select another station behind or beside you.
 
 ### Gamepad / controller (experimental)
 
@@ -269,6 +271,8 @@ separate unlock; admins can still disable it through server world rules.
   oxygen keeps draining while submerged on non-breathable worlds.
 
 ### Mining & tools
+- Mining debris and impact sounds follow the material you break. **Reduced effects** removes the
+  final contact glint and uses fewer, smaller dust particles; it does not change mining speed or drops.
 - Tools have a **kind** (drill/scanner/…) and **tier** (1–5). A block has a **hardness** and may require a
   minimum tool tier; mining accumulates the tool's power until it exceeds the hardness, then the block
   breaks and yields its **drops**. Powerful drills can clear a small radius — the sweep only takes blocks

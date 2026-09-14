@@ -45,6 +45,45 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         }
 
         [Test]
+        public void AimingAtTheAftHatchClearsTheNearbyCockpitPrompt()
+        {
+            SetStations(new[] { new NetShipStation { Type = "cockpit", X = 0f, Y = 0f, Z = 0f } });
+            var rig = new GameObject("Player prompt verification");
+            rig.transform.SetParent(_root.transform, false);
+            rig.transform.position = new Vector3(0f, 0f, -2f);
+            var player = rig.AddComponent<PlayerController>();
+            rig.GetComponent<CharacterController>().enabled = false;
+            player.Game = _game;
+            player.Camera = _camera;
+            var refresh = typeof(PlayerController).GetMethod("RefreshStationPrompt", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(refresh);
+            refresh.Invoke(player, null);
+            Assert.AreEqual("cockpit", _game.NearbyStation);
+            Assert.AreEqual("cockpit", _game.NearestStationType(rig.transform.position, 3f),
+                "The off-screen cockpit really is nearby; removing the stale prompt must not rely on distance.");
+
+            Box("Aft hatch", new Vector3(0f, 1.4f, -4f), new Vector3(2f, 2.8f, 0.18f));
+            _camera.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+            Physics.SyncTransforms();
+            refresh.Invoke(player, null);
+            Assert.AreEqual(string.Empty, _game.NearbyStation,
+                "Facing the hatch must not advertise or interact with the cockpit behind the player.");
+        }
+
+        [Test]
+        public void AdjacentWallIsNotAStationMarkerButTheActualPedestalRemainsSelectable()
+        {
+            SetStations(new[] { new NetShipStation { Type = "console", X = 0f, Y = 0f, Z = 0f } });
+            Box("Station pedestal", new Vector3(0f, 0.5f, 0f), Vector3.one);
+            Box("Adjacent wall", new Vector3(1f, 0.5f, 0f), Vector3.one);
+            _camera.transform.position = new Vector3(1f, 0.5f, -2f);
+            Physics.SyncTransforms();
+            Assert.AreEqual(string.Empty, _game.LookedStationType(_camera, 4f));
+            _camera.transform.position = new Vector3(0f, 0.5f, -2f);
+            Assert.AreEqual("console", _game.LookedStationType(_camera, 4f));
+        }
+
+        [Test]
         public void VisibleMonitorWinsOverTheMarkerClosestToTheWallBehindIt()
         {
             Box("Wall behind console", new Vector3(0f, 1.5f, 0.65f), new Vector3(3f, 3f, 0.1f));

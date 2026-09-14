@@ -186,7 +186,14 @@ namespace BlocksBeyondTheStars.Client
                 dock.transform.localPosition = m.SpecimenDock;
                 dock.transform.localRotation = Quaternion.Euler(0f, m.SpecimenYaw, 0f);
                 // Local station decor already supplies the owner's table. Observers need the same dock.
-                if (m.OwnerId != Game.LocalPlayerId) StationDecorView.BuildModel(dock.transform, "workshop");
+                if (m.OwnerId != Game.LocalPlayerId)
+                {
+                    var marker = new Vector3i(Mathf.FloorToInt(m.SpecimenDock.x),
+                        Mathf.FloorToInt(m.SpecimenDock.y) - 1, Mathf.FloorToInt(m.SpecimenDock.z));
+                    m.Shapes.TryGetValue(marker, out int markerShape);
+                    bool cased = StationDecorView.UsesMarkerCasing("workshop", Game.Content.BlockById(m.Get(marker))?.Key, markerShape);
+                    StationDecorView.BuildFixture(dock.transform, "workshop", cased);
+                }
                 StationDecorView.BuildSurveySpecimen(dock.transform);
             }
 

@@ -96,6 +96,19 @@ namespace BlocksBeyondTheStars.Client
             return true;
         }
 
+        /// <summary>Keep scripted still captures free of concurrent gameplay input. This capability is
+        /// unavailable in an ordinary player process; Escape remains a native capture-cancel action.</summary>
+        public static bool AttachCaptureInput(IInputSource source)
+        {
+            bool allowed = Application.isEditor || System.Array.Exists(System.Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-captureShots", System.StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(arg, "-captureCredits", System.StringComparison.OrdinalIgnoreCase));
+            if (!allowed || source == null || _automation != null) return false;
+            _automation = source;
+            _exclusiveVerificationInput = true;
+            return true;
+        }
+
         public static bool OwnsVerificationInput(IInputSource source)
             => _exclusiveVerificationInput && object.ReferenceEquals(_automation, source);
 

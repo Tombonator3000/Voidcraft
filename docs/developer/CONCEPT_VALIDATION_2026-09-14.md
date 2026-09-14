@@ -4,6 +4,25 @@ This is an in-progress implementation record, not release approval or a claim of
 The full scope remains in [TODO.md](../../TODO.md). All launches use isolated profiles so installed saves
 are not used or migrated. Local validation players are not official distribution builds.
 
+## Current checkpoint
+
+The published draft is commit `ad1a681` in [PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10).
+Its cloud playtest failed five fresh-world Veyl placement cases; packaging was skipped. The eighth local
+candidate corrects those cases with supported basalt seating and an open half-step approach, preserves
+the complete reservation through JSON save/reload, and protects existing content and player edits.
+It also corrects periodic wrapped-chunk eviction, navigation detours, aimed station hints, equipment
+readability and versioned vault lighting. These corrections have not yet been pushed or distributed.
+
+The corrected eighth clean CI build has zero warnings/errors. All 135 distinct selected server cases
+(including all five previously failing seeds) and 205 Client.Tests pass, with zero skips. The first
+eighth build's compile failure and its exact source snapshot are retained separately. Full restored
+format verification passes with zero changes across 677 files after three whitespace-only corrections.
+The full Linux player builds without C# or shader diagnostics. All 100 Unity cases pass (91 EditMode,
+one atlas and eight terrain-seam PlayMode), zero skipped. The real-input journey, settled captures and
+performance measurements remain pending. Generator and save tests do not establish physical controller
+access or visual quality. The frozen eighth build source manifest is
+`8fbaa342ca9f34b90f10056b2869db33a9fcf3454ece9da6c530b6455a7e5172`, over commit `ad1a681`.
+
 ## Identity
 
 - Working branch: `feat/concept-visual-upgrade` from playable
@@ -220,8 +239,81 @@ Seventh source SHA256: `3ca23526da8168d543c3f99d8277ed3dc451ec7b2b916d2c6c9ae085
 Seventh frozen payload SHA256: `1231a6ed7688d3810dde07fd76a293455f6a96abfeb7388ab36db3791702ffdb`
 (263 files). Full Linux build: zero C# and shader diagnostics. All 77 EditMode, one atlas PlayMode and
 eight terrain-seam PlayMode cases passed, zero skipped; source remained unchanged through validation.
-The third actual journey attempt is running against this payload with isolated core and UI test input.
-Complete acquire/reload, concept captures and valid performance samples remain pending.
+The third actual journey attempt verified physical hatch exit, ordinary scanner selection and 13.4 m
+of walking. It then failed at `SignalWalk`, 65 m from the inscription, when the local route planner
+returned no waypoints at a tall terrain face. The current 6.75 m planning window requires immediate
+progress toward the target; this does not establish that a player cannot take a longer detour.
+Core/UI input isolation and graceful shutdown passed. Scan, excavation, shaping, homecoming and
+second-process reload were not reached. Raw events, the failure screenshot and the assessment remain
+in `seventh/journey-4242-attempt03/`. Complete acquire/reload, current concept captures and valid
+performance samples remain pending.
+
+The verified checkpoint is `ad1a681f8007bd9ce447e8acc210b952165c4179`, pushed on the working branch.
+[Draft PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10) targets `feat/voidcraft-playable`.
+[Cloud playtest run 34882893539](https://github.com/Tombonator3000/Voidcraft/actions/runs/34882893539)
+was dispatched for that exact commit. It failed validation: 1830/1835 fast-tier server cases passed,
+with the five placement failures listed below. Client tests and both player packaging jobs were skipped;
+no downloadable game artifact was produced by this run.
+
+## Seventh runtime review and next corrections
+
+The default seed 424242 capture produced eight views; the rocky seed 4242 sequence produced nine.
+Both are High 1920×1080, use isolated profiles and scripted poses, and lack the forward home view.
+Most terrain/home shots still had pending mesh work and cannot establish complete landscape geometry.
+The rocky `veyl_vault.png` did reach zero work across every mesh/collider stage, with no failures:
+the tall frames, suspended Anchor and side route exist, but the Anchor, pit and bridge break are too dark.
+The aft home view shows the intended aisle, warm ceiling apertures and useful room fixtures. Off-screen
+station prompts, shadowed equipment faces and terrain-looking marker bases still need correction.
+
+The seventh exclusive-input performance attempt held the body, camera and FOV completely still for all
+658 sampled frames. SSAO full and POM on applied, and natural onboarding had completed. Nevertheless,
+three terrain-work bursts recurred approximately ten seconds apart, peaking at 432 pending items, then
+draining to zero; loaded data/object counts stayed at 510. This failed the empty-work idle gate (exit 4).
+Its 45.60 ms average is not an accepted steady-render comparison. All frames were unfocused. Source
+inspection identifies the ten-second server chunk eviction sweep using unwrapped distance for canonical
+seam chunks; the correction needs regression and runtime verification before any savings are claimed.
+
+The broader PR CI found five placement-guarantee regressions missed by selected local coverage:
+`tablelands/37`, `ocean/71`, `highland/23`, `rocky/11` and `swamp/67` failed to place the larger Veyl
+site. Other test shards, format and workflow/Python checks passed. A safe fresh-world placement fallback
+is being corrected; the draft must not be treated as green or releasable.
+
+The next source candidate includes bounded detour navigation, guarded fixture casings and directional
+equipment bounce, aimed station prompts, material-aware mining sound/debris and reduced-effect impacts.
+Capture input becomes exclusive and concept images require a logged quiet interval; unavailable views
+cause a nonzero exit. Veyl geometry version four retains version-three occupancy, shapes and contacts,
+while improving interior light sources, path edge lamps and matte Anchor contour bands. Versions zero
+through three retain their saved generator behavior. The eighth player now builds cleanly and all 100
+Unity cases pass; accepted visual/performance runs remain pending.
+
+Focused eighth-source Unity verification passed 39 distinct EditMode cases across the initial run
+(38/39) and the corrected equipment rerun (18/18), with no skips or compiler/shader diagnostics.
+The sole failure was a fixture passing raw packed shape `1`, which means a rotated cube, while claiming
+to test stairs. The corrected fixture explicitly permits that cube and rejects a properly packed stair.
+Production casing logic was unchanged. This focused result does not replace the full player build.
+
+## Eighth build and corrected terrain placement
+
+The full Linux client, bundled server and launcher build passed with zero C# or shader diagnostics.
+All 25 changed implementation paths stayed unchanged through the build. The source archive SHA256 is
+`a80c51405dcd2617b215dc08d0a30a897b82a2d8f0b2508dd2b8b7a5180cdafe`; the frozen 263-file player
+manifest is `e5fdd962e2ed7f4fdd9307fdcb78823187318ce4147fcd129cca8c1be0a75822`.
+
+New Veyl sites first try the existing nearby dry-ground search. On a never-materialized body, a bounded
+fallback can build a supported basalt terrace or dry wellhead, with a five-meter-wide approach using
+actual half-step stair shapes. The complete cut/fill and approach reservation is stored with the site.
+Other content and player changes are checked before stamping, including both world seams. Existing
+sites replay their persisted edits instead of running placement or terraforming again. This fallback
+is a placement correction; its rectangular foundation alone does not satisfy the basalt landscape concept.
+
+The 135 selected server cases cover all five previously failing planet seeds, visible stair/headroom
+cells and ground support, JSON reservation round-trip, malformed-metadata fallback, protected player
+edits and repeated actual streaming sweeps at both seams. All 205 Client.Tests pass. Full restored
+format passes after three verified whitespace-only corrections. Build/test logs and before/after source
+manifests remain under the ignored `eighth/` evidence directory.
+The complete Unity run passes 91 EditMode, one atlas and eight terrain-seam PlayMode cases, with zero
+skips or compiler/shader diagnostics. Final verification confirms all 25 source paths and all 263
+player payload files still match their saved hashes, with no extra payload files.
 
 ## Remaining gates
 
@@ -232,4 +324,4 @@ Complete acquire/reload, concept captures and valid performance samples remain p
 - Real new-player actions and navigation through the survey, plus restart/continuation and observer view.
 - Representative terrain traversal, building, cabin and excavated ruin performance. Current High fails.
 - Useful shelter/bridge/power scenarios and actionable weather choices remain in scope.
-- Verified checkpoint and unmerged PR, followed by authorized cloud playtest distribution.
+- Successful cloud playtest artifacts and accurate opening steps; the checkpoint and draft PR exist.

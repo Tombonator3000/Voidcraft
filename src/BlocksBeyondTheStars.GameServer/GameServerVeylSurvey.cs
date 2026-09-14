@@ -7,6 +7,7 @@ using System.Linq;
 using BlocksBeyondTheStars.Networking.Messages;
 using BlocksBeyondTheStars.Shared.Definitions;
 using BlocksBeyondTheStars.Shared.Geometry;
+using BlocksBeyondTheStars.Shared.State;
 using BlocksBeyondTheStars.Shared.World;
 using BlocksBeyondTheStars.WorldGeneration;
 
@@ -48,6 +49,8 @@ public sealed partial class GameServer
         var rng = RngFor(_meta.Seed, SurveyKind);
         Vector3i origin;
         int ground;
+        VeylTerrainPlan? terrainPlan = null;
+        string seat = "buried";
         if (record is not null)
         {
             if (!record.Placed) return;
@@ -65,6 +68,7 @@ public sealed partial class GameServer
                 reserved.Add(((s.Min.X + s.Max.X) / 2, (s.Min.Z + s.Max.Z) / 2, (s.Max.X - s.Min.X) / 2, (s.Max.Z - s.Min.Z) / 2));
             foreach (var c in _banditCamps)
                 reserved.Add(((c.Min.X + c.Max.X) / 2, (c.Min.Z + c.Max.Z) / 2, (c.Max.X - c.Min.X) / 2, (c.Max.Z - c.Min.Z) / 2));
+            AddVeylContentReservations(reserved);
             int px = _landingPads.Count > 0 ? _landingPads[0].CenterX : 0;
             int pz = _landingPads.Count > 0 ? _landingPads[0].CenterZ : 0;
             reserved.Add((px - 56, pz + 56, 18, 18)); // starter wreck reserve
@@ -88,6 +92,9 @@ public sealed partial class GameServer
                 found = true;
                 break;
             }
+            if (!found && _worlds.Active.VirginAtLoad)
+                found = TryPlaceVeylTerrace(structure, geometryVersion, reserved,
+                    out origin, out ground, out seat, out terrainPlan);
             if (!found)
             {
                 ReportStamp(SurveyKind, 1, 0);
@@ -112,13 +119,28 @@ public sealed partial class GameServer
             int cellOperations = 0;
             _repo.RunInTransaction(() =>
             {
-                cellOperations = StampMonumentBlocks(placement, geometryVersion);
-                RecordPlacement(SurveyKind, 0, origin, ground, false, "buried", "veyl_anchor", geometryVersion);
+                if (terrainPlan is not null) cellOperations = StampVeylTerrace(terrainPlan);
+                cellOperations += StampMonumentBlocks(placement, geometryVersion);
+                RecordPlacement(SurveyKind, 0, origin, ground, false, seat, "veyl_anchor", geometryVersion);
+                if (terrainPlan is not null)
+                {
+                    var pinned = FindPlacementRecord(SurveyKind, 0)!;
+                    pinned.Reservation = new StructureReservationBounds
+                    {
+                        MinX = terrainPlan.Min.X,
+                        MinY = terrainPlan.Min.Y,
+                        MinZ = terrainPlan.Min.Z,
+                        MaxX = terrainPlan.Max.X,
+                        MaxY = terrainPlan.Max.Y,
+                        MaxZ = terrainPlan.Max.Z,
+                    };
+                }
                 SavePlacementRecords();
             });
             _log.Info($"Veyl geometry v{geometryVersion}: {cellOperations} cell operations in {stampTimer.ElapsedMilliseconds} ms.");
         }
         RegisterMonument(placement, "veyl_anchor");
+        ReportStamp(SurveyKind, 1, 1);
     }
 
     private bool SurveyContactReachable(PlayerSession session, Vector3i contact)

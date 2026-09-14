@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Text;
 using BlocksBeyondTheStars.Networking.Messages;
+using BlocksBeyondTheStars.Shared.World;
 using UnityEngine;
 
 namespace BlocksBeyondTheStars.Client
@@ -11,7 +12,8 @@ namespace BlocksBeyondTheStars.Client
     /// <summary>
     /// Compact ceramic/graphite fixtures for server-provided ship stations. Every solid detail is
     /// combined into one cached draw, with a second draw for narrow display/lamp inlays. All fixtures
-    /// stay above their solid marker cell, clear of neighboring walkways; they never add collision or
+    /// stay over their solid marker cell, clear of neighboring walkways; guarded casing may cover the
+    /// existing cube's faces with a one-millimeter offset. They never add collision or
     /// authoritative state. Positions follow <see cref="GameBootstrap.ScenePos"/> across the torus wrap.
     /// </summary>
     public sealed class StationDecorView : MonoBehaviour
@@ -29,6 +31,8 @@ namespace BlocksBeyondTheStars.Client
             internal string Type;
             internal Renderer Surface;
             internal Bounds Bounds;
+            internal NetShipStation Marker;
+            internal bool Cased;
         }
 
         private readonly List<Fixture> _decor = new();
@@ -48,6 +52,19 @@ namespace BlocksBeyondTheStars.Client
             if (!ReferenceEquals(_builtFor, Game.Stations))
             {
                 Rebuild();
+            }
+            else
+            {
+                // Station metadata can arrive before its ship/world cells. Do not cover an unverified
+                // marker; rebuild the shared variant only when the actual cube becomes known or changes.
+                foreach (var fixture in _decor)
+                {
+                    if (fixture.Cased != HasLegacyMarker(fixture.Marker))
+                    {
+                        Rebuild();
+                        break;
+                    }
+                }
             }
 
             foreach (var fixture in _decor)
@@ -118,7 +135,8 @@ namespace BlocksBeyondTheStars.Client
             _builtFor = Game.Stations;
             foreach (var station in _builtFor ?? System.Array.Empty<NetShipStation>())
             {
-                var root = BuildModel(transform, station.Type);
+                bool cased = HasLegacyMarker(station);
+                var root = BuildFixture(transform, station.Type, cased);
                 if (root == null)
                 {
                     continue;
@@ -133,6 +151,8 @@ namespace BlocksBeyondTheStars.Client
                     World = new Vector3(station.X, station.Y + 1f, station.Z),
                     Type = station.Type,
                     Surface = root.transform.Find("Housing").GetComponent<Renderer>(),
+                    Marker = station,
+                    Cased = cased,
                 });
                 if (station.Type == "cockpit")
                 {
@@ -147,6 +167,32 @@ namespace BlocksBeyondTheStars.Client
         }
 
         internal static GameObject BuildModel(Transform parent, string type)
+            => BuildFixture(parent, type, false);
+
+        private bool HasLegacyMarker(NetShipStation station)
+        {
+            if (Game?.Content == null || station == null) return false;
+            int x = Mathf.FloorToInt(station.X), y = Mathf.FloorToInt(station.Y), z = Mathf.FloorToInt(station.Z);
+            var id = Game.LandedShipBlockAt(x, y, z, out var ship, out var local);
+            int shape = 0;
+            if (!id.IsAir)
+            {
+                ship.Shapes.TryGetValue(local, out shape);
+            }
+            else
+            {
+                if (Game.World == null) return false;
+                id = Game.World.GetBlock(x, y, z);
+                shape = Game.World.GetShape(x, y, z);
+            }
+            return UsesMarkerCasing(station.Type, Game.Content.BlockById(id)?.Key, shape);
+        }
+
+        internal static bool UsesMarkerCasing(string type, string key, int shape)
+            => ShapeCode.ShapeOf(shape) == 0 && (type, key) is
+                ("medbay", "ice") or ("quarters", "carbon") or ("workshop", "stone");
+
+        internal static GameObject BuildFixture(Transform parent, string type, bool cased)
         {
             if (type != "cockpit" && type != "medbay" && type != "lab" && type != "console"
                 && type != "workshop" && type != "quarters" && type != "cargo" && type != "life_support")
@@ -154,8 +200,16 @@ namespace BlocksBeyondTheStars.Client
                 return null;
             }
 
-            return EquipmentGeometry.Create(parent, type + " fixture", "station:" + type, Cyan, b =>
+            return EquipmentGeometry.Create(parent, type + " fixture", "station:" + type + (cased ? ":cased" : ""), Cyan, b =>
             {
+                if (cased)
+                {
+                    // Legacy interaction markers use ice/carbon/stone. Cover only a verified full cube,
+                    // keeping its saved identity and collision. The small face offset prevents z-fighting;
+                    // do not bevel these edges and reveal the unrelated terrain material underneath.
+                    b.Box(new Vector3(0f, -0.5f, 0f), new Vector3(1.002f, 1.002f, 1.002f),
+                        type == "quarters" ? EquipmentGeometry.Finish.Graphite : EquipmentGeometry.Finish.Ceramic);
+                }
                 switch (type)
                 {
                     case "cockpit": BuildCockpit(b); break;
