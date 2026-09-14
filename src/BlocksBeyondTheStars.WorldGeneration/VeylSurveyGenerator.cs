@@ -51,6 +51,34 @@ public static class VeylSurveyGenerator
             _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
         };
 
+    /// <summary>Bounded cosmetic pulse route through authored north-facing rune surfaces. This only
+    /// describes existing geometry: it never stamps blocks, changes saved versions, or invents an Anchor
+    /// in legacy sites. The server must filter removed, reshaped and covered hosts before sending it.</summary>
+    public static IEnumerable<Vector3i> SignalNodes(int geometryVersion)
+    {
+        if (geometryVersion is 0 or 1)
+        {
+            yield return BuriedContact;
+            yield return SurfaceContact;
+            yield break;
+        }
+        if (geometryVersion is not (2 or 3 or 4)) yield break;
+        yield return VaultBuriedContact;
+        // Pointed tips are intentionally excluded: a full-face decal would float off their pyramids.
+        for (int y = 12; y <= 21; y++)
+        {
+            int radius = y <= 12 || y >= 21 ? 0 : y <= 14 || y >= 19 ? 1 : 2;
+            yield return new Vector3i(12, y, 50 - radius);
+        }
+        // The closest complete frame receives the answer after the Anchor's spine.
+        for (int y = 7; y <= 19; y += 4)
+        {
+            yield return new Vector3i(6, y, 50);
+            yield return new Vector3i(18, y, 50);
+        }
+        yield return VaultSurfaceContact;
+    }
+
     private static SettlementStructure GenerateLegacy(GameContent content, string surfaceBlock)
     {
         const int Size = 17;

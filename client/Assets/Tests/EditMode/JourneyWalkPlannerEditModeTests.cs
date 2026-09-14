@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using BlocksBeyondTheStars.Shared.Content;
+using BlocksBeyondTheStars.Shared.Geometry;
+using BlocksBeyondTheStars.Shared.Primitives;
 using BlocksBeyondTheStars.Shared.World;
 using Object = UnityEngine.Object;
 using System.Reflection;
@@ -16,6 +21,7 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         private GameObject _root;
         private PlayerController _player;
         private CharacterController _capsule;
+        private readonly List<Mesh> _meshes = new();
 
         [SetUp]
         public void SetUp()
@@ -36,6 +42,8 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         public void TearDown()
         {
             Object.DestroyImmediate(_root);
+            foreach (var mesh in _meshes) if (mesh != null) Object.DestroyImmediate(mesh);
+            _meshes.Clear();
             Physics.SyncTransforms();
         }
 
@@ -207,6 +215,176 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             }
             Assert.That(plans, Is.LessThan(64), "Repeated queries must not create an endless exploration loop.");
             Assert.AreEqual("goal_exploration_budget_exhausted", Status(search.GetType().GetField("Diagnostics").GetValue(search)));
+        }
+
+        [Test]
+        public void AuthoredStarterStairReproducesCentreRayFalseHeadroomAndFindsFootprintClearance()
+        {
+            BuildObservedStarterHatch();
+            var sample = new Vector3(0.51493406f, 59.03f, -5.8108606f);
+            Assert.IsTrue(Physics.Raycast(sample + Vector3.up * 1.2f, Vector3.down, out var hit, 3.5f,
+                ~0, QueryTriggerInteraction.Ignore));
+            Assert.That(hit.point.y, Is.EqualTo(58.5f).Within(0.005f), "The recorded sample hits the lower authored tread.");
+            float radius = _capsule.radius + 0.015f;
+            Vector3 centreOnly = new(sample.x, hit.point.y + 0.03f, sample.z);
+            Assert.IsTrue(Physics.OverlapCapsule(centreOnly + Vector3.up * (radius + 0.025f),
+                centreOnly + Vector3.up * (_capsule.height - radius), radius, ~0, QueryTriggerInteraction.Ignore)
+                .Any(c => c.name == "ShipChunk 0,0,-1"), "The earlier single-ray query must reproduce the actual stair collision.");
+            var planner = typeof(PlayerController).Assembly.GetType("BlocksBeyondTheStars.Client.JourneyWalkPlanner");
+            object[] args = { _player, _capsule, sample, Vector3.zero, null };
+            Assert.IsTrue((bool)planner.GetMethod("TryFloor", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args));
+            var clearance = (Vector3)args[3];
+            Assert.That(clearance.y, Is.EqualTo(59.03f).Within(0.005f), "The observed higher tread yields a clear centred waypoint; the real rounded capsule may settle lower.");
+            Assert.That(_player.transform.position, Is.EqualTo(new Vector3(0.51493406f, 59.03f, -2.8108604f)));
+        }
+
+        [Test]
+        public void ActualStarterCapsuleCanWalkThroughTheRecordedOpenHatchWithoutJumping()
+        {
+            BuildObservedStarterHatch();
+            // Fixture locomotion uses Unity's real ordinary capsule; no translation after the initial
+            // recorded-pose arrangement. This isolates physical accessibility from harness planning.
+            for (int i = 0; i < 150; i++) _capsule.Move(new Vector3(0f, -0.04f, -0.035f));
+            Assert.That(_player.transform.position.z, Is.LessThan(-6.75f));
+            Assert.That(_player.transform.position.y, Is.EqualTo(58.03f).Within(0.12f));
+        }
+
+        [Test]
+        public void LoadedStarterExitUsesTheDriversHorizontalAndVerticalArrivalPredicate()
+        {
+            BuildObservedStarterHatch();
+            var start = _player.transform.position;
+            var goal = new Vector3(0f, 59f, -7f); // actual journey target retains the one-metre-higher cabin floor
+            var result = Search(goal);
+            Assert.AreEqual("goal_route", Status(result.Report));
+            Assert.That(result.Route.Count, Is.GreaterThan(0));
+            var end = result.Route[result.Route.Count - 1];
+            Assert.That(end.z, Is.LessThan(-6.35f));
+            Assert.That(end.y, Is.EqualTo(58.03f).Within(0.02f));
+            Assert.That(Vector3.Distance(end, goal), Is.GreaterThan(0.7f), "The old spherical predicate incorrectly rejected this ordinary landing.");
+            Assert.IsTrue(Arrived(end, goal, 0.65f, true));
+            Assert.That(_player.transform.position, Is.EqualTo(start), "Planning never moves the real player body.");
+        }
+
+        [Test]
+        public void ClearCentreFloorBesideAQuarterPanelDoesNotRiseIntoTheLowCeiling()
+        {
+            Box("Ground", new Vector3(0f, -0.5f, 0f), new Vector3(20f, 1f, 20f));
+            Box("Ceiling underside 2.10", new Vector3(0f, 2.15f, 0f), new Vector3(20f, 0.1f, 20f));
+            Box("Left corridor wall", new Vector3(-1f, 1f, 0f), new Vector3(1f, 2f, 20f));
+            Box("Right corridor wall", new Vector3(2f, 1f, 0f), new Vector3(1f, 2f, 20f));
+            var content = ContentLoader.LoadFromDirectory(Path.Combine(Application.streamingAssetsPath, "data"));
+            var block = content.GetBlock("steel_floor").NumericId;
+            var chunk = new ChunkData(new ChunkCoord(0, 0, 0));
+            int panel = ShapeCode.Pack(BlockShape.Panel, 0);
+            for (int z = 0; z < 6; z++) { chunk.Set(0, 0, z, block); chunk.SetShape(0, 0, z, panel); }
+            var (render, collider) = ChunkMesher.Build(chunk, content,
+                (x, y, z) => x == 0 && y == 0 && z >= 0 && z < 6 ? block : BlockId.Air,
+                worldShape: (x, y, z) => x == 0 && y == 0 && z >= 0 && z < 6 ? panel : 0);
+            _meshes.Add(render); _meshes.Add(collider);
+            var edge = new GameObject("Authored quarter-height Panel edge");
+            edge.transform.SetParent(_root.transform);
+            edge.transform.position = new Vector3(0.34f, 0f, -1f);
+            edge.AddComponent<MeshCollider>().sharedMesh = collider;
+            _capsule.radius = 0.35f; _capsule.skinWidth = 0.03f; _capsule.stepOffset = 0.6f;
+            var start = new Vector3(0f, 0.03f, -0.75f);
+            _player.transform.position = start;
+            Physics.SyncTransforms();
+            Assert.IsTrue(Physics.Raycast(new Vector3(0.343f, 1.2f, 0f), Vector3.down, out var edgeHit, 2f,
+                ~0, QueryTriggerInteraction.Ignore));
+            Assert.That(edgeHit.point.y, Is.EqualTo(0.25f).Within(0.005f), "An offset ray really sees the side panel.");
+            var planner = typeof(PlayerController).Assembly.GetType("BlocksBeyondTheStars.Client.JourneyWalkPlanner");
+            object[] args = { _player, _capsule, new Vector3(0f, 0.03f, 0f), Vector3.zero, null };
+            Assert.IsTrue((bool)planner.GetMethod("TryFloor", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args));
+            Assert.That(((Vector3)args[3]).y, Is.EqualTo(0.03f).Within(0.005f), "A valid centre floor must win over the optional raised side edge.");
+            var step = planner.GetMethod("ClearStep", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsFalse((bool)step.Invoke(null, new object[] { _player, _capsule, start, new Vector3(0f, 0.28f, 0f), null }),
+                "The previous highest-offset choice incorrectly swept into this ceiling.");
+            Assert.IsTrue((bool)step.Invoke(null, new object[] { _player, _capsule, start, (Vector3)args[3], null }));
+            var result = Search(new Vector3(0f, 0.03f, 3f));
+            Assert.AreEqual("goal_route", Status(result.Report));
+            Assert.That(result.Route.TrueForAll(p => Mathf.Abs(p.y - 0.03f) < 0.01f), Is.True);
+            Assert.AreEqual(start, _player.transform.position, "Planning cannot move the body.");
+            for (int i = 0; i < 70; i++) _capsule.Move(new Vector3(0f, -0.04f, 0.05f));
+            Assert.That(_player.transform.position.z, Is.GreaterThan(2.5f), "The ordinary capsule must really fit beside the panel and below the ceiling.");
+        }
+
+        [Test]
+        public void SharedArrivalStillRejectsWrongStoreyAndHorizontalMiss()
+        {
+            var goal = new Vector3(3f, 9f, -4f);
+            Assert.IsTrue(Arrived(goal + new Vector3(0.2f, -1f, 0.2f), goal, 0.7f, true));
+            Assert.IsFalse(Arrived(goal + Vector3.up * 1.25f, goal, 0.7f, true));
+            Assert.IsFalse(Arrived(goal + Vector3.forward * 0.71f, goal, 0.7f, true));
+            Assert.IsTrue(Arrived(goal + Vector3.up * 4f, goal, 0.7f, false));
+        }
+
+        private static bool Arrived(Vector3 position, Vector3 goal, float reach, bool matchHeight)
+            => (bool)typeof(PlayerController).Assembly.GetType("BlocksBeyondTheStars.Client.JourneyWalkPlanner")
+                .GetMethod("Arrived", BindingFlags.NonPublic | BindingFlags.Static)
+                .Invoke(null, new object[] { position, goal, reach, matchHeight });
+
+        private void BuildObservedStarterHatch()
+        {
+            var content = ContentLoader.LoadFromDirectory(Path.Combine(Application.streamingAssetsPath, "data"));
+            var layout = content.GetShipLayout("ship_starter_home");
+            Assert.NotNull(layout);
+            Assert.AreEqual((6, 4, 11), (layout.Width, layout.Height, layout.Length));
+            var cells = new Dictionary<Vector3i, BlockId>();
+            var shapes = new Dictionary<Vector3i, int>();
+            foreach (var cell in layout.Cells)
+            {
+                if (cell.Id is "hatch" or "door_slide" or "door_hinge" or "door_energy") continue;
+                // Station marker materials differ visually; they are the same occupied full cube for
+                // collision. Element mapping follows the served starter's ordinary structure path.
+                string key = cell.Kind == "station" ? "iron_wall" : cell.Id switch
+                {
+                    "engine" => "carbon", "light" or "headlight" => "light_white", _ => cell.Id,
+                };
+                var block = content.GetBlock(key) ?? content.GetBlock("iron_wall");
+                var point = new Vector3i(cell.X, cell.Y, cell.Z);
+                cells[point] = block.NumericId;
+                if (cell.Shape != 0) shapes[point] = cell.Shape;
+            }
+            Assert.AreEqual(ShapeCode.Pack(BlockShape.Stairs, 0), shapes[new Vector3i(2, 0, -1)]);
+            Assert.AreEqual(ShapeCode.Pack(BlockShape.Stairs, 0), shapes[new Vector3i(3, 0, -1)]);
+            BlockId Cell(int x, int y, int z) => cells.TryGetValue(new Vector3i(x, y, z), out var block) ? block : BlockId.Air;
+            int Shape(int x, int y, int z) => shapes.TryGetValue(new Vector3i(x, y, z), out int value) ? value : 0;
+            var ship = new GameObject("LandedShip Pilot");
+            ship.transform.SetParent(_root.transform);
+            ship.transform.position = new Vector3(-3f, 58f, -5f); // recorded server origin, unrotated local chunks
+            foreach (var coord in cells.Keys.Select(WorldConstants.WorldToChunk).Distinct())
+            {
+                var chunk = new ChunkData(coord);
+                foreach (var cell in cells.Where(c => WorldConstants.WorldToChunk(c.Key).Equals(coord)))
+                {
+                    var local = WorldConstants.WorldToLocal(cell.Key);
+                    chunk.Set(local.X, local.Y, local.Z, cell.Value);
+                    if (shapes.TryGetValue(cell.Key, out int shape)) chunk.SetShape(local.X, local.Y, local.Z, shape);
+                }
+                var (render, collider) = ChunkMesher.Build(chunk, content, Cell, worldShape: Shape);
+                _meshes.Add(render); _meshes.Add(collider);
+                var go = new GameObject($"ShipChunk {coord.X},{coord.Y},{coord.Z}");
+                go.transform.SetParent(ship.transform, false);
+                var origin = WorldConstants.ChunkOrigin(coord);
+                go.transform.localPosition = new Vector3(origin.X, origin.Y, origin.Z);
+                go.AddComponent<MeshCollider>().sharedMesh = collider;
+            }
+            Box("Observed landing terrain", new Vector3(0f, 57.5f, 0f), new Vector3(80f, 1f, 80f));
+            var game = _root.AddComponent<GameBootstrap>();
+            var world = new ClientWorld();
+            for (int x = -3; x <= 2; x++)
+            for (int y = 2; y <= 4; y++)
+            for (int z = -3; z <= 2; z++)
+                world.StoreChunk(new ChunkCoord(x, y, z), new ushort[WorldConstants.BlocksPerChunk]);
+            typeof(GameBootstrap).GetProperty("Content").SetValue(game, content);
+            typeof(GameBootstrap).GetProperty("World").SetValue(game, world);
+            _player.Game = game;
+            // WorldRig's actual normal capsule dimensions and settings, not the smaller generic fixture.
+            _capsule.height = 1.8f; _capsule.radius = 0.35f; _capsule.center = Vector3.up * 0.9f;
+            _capsule.skinWidth = 0.03f; _capsule.stepOffset = 0.6f; _capsule.slopeLimit = 50f;
+            _player.transform.position = new Vector3(0.51493406f, 59.03f, -2.8108604f);
+            Physics.SyncTransforms();
         }
 
         private static Type Nested(string name) => typeof(PlayerController).Assembly.GetType("BlocksBeyondTheStars.Client.JourneyWalkPlanner+" + name);

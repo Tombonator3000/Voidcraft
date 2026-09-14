@@ -381,23 +381,31 @@ namespace BlocksBeyondTheStars.Client
             float savedPitch = Mathf.DeltaAngle(0f, pc.Camera.transform.localEulerAngles.x);
             for (int view = 0; view < 2; view++)
             {
-                int x = home.Width / 2, z = view == 0 ? 1 : home.Length - 3;
-                var floor = new BlocksBeyondTheStars.Shared.Geometry.Vector3i(x, 0, z);
-                if (z <= 0 || home.Get(floor).IsAir
-                    || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 1, 0)).IsAir
-                    || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 2, 0)).IsAir)
+                bool grounded = false;
+                // A single rear aisle pose repeatedly failed the physical grounding check. Try a small
+                // observed aisle range; an image still requires a real grounded capsule and quiet world.
+                for (int candidate = 0; candidate < 3 && !grounded; candidate++)
                 {
-                    Debug.LogWarning($"[Capture] Home view {view} unavailable: observed aisle is occupied.");
-                    _failedViews++;
-                    continue;
+                    int x = home.Width / 2;
+                    int z = view == 0 ? 1 + candidate : home.Length - 3 - candidate;
+                    var floor = new BlocksBeyondTheStars.Shared.Geometry.Vector3i(x, 0, z);
+                    if (z <= 0 || z >= home.Length - 1 || home.Get(floor).IsAir
+                        || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 1, 0)).IsAir
+                        || !home.Get(floor + new BlocksBeyondTheStars.Shared.Geometry.Vector3i(0, 2, 0)).IsAir)
+                        continue;
+                    Vector3 feet = boot.ScenePos(home.Origin.X + x + 0.5f, home.Origin.Y + 1.03f,
+                        home.Origin.Z + z + 0.5f);
+                    pc.SetCapturePose(feet, view == 0 ? 0f : 180f, 4f);
+                    yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
+                    grounded = pc.IsCaptureGrounded;
+                    Debug.Log($"[Capture] Home view {view} candidate={candidate} grounded={grounded} "
+                        + $"actual={pc.transform.position} requested={feet} menu={boot.MenuOpen} "
+                        + $"paused={boot.WorldPaused} cinematic={boot.CinematicCameraActive} flying={pc.Flying} "
+                        + $"timeScale={Time.timeScale} deltaTime={Time.deltaTime}");
                 }
-                Vector3 feet = boot.ScenePos(home.Origin.X + x + 0.5f, home.Origin.Y + 1.15f,
-                    home.Origin.Z + z + 0.5f);
-                pc.SetCapturePose(feet, view == 0 ? 0f : 180f, 4f);
-                yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
-                if (!pc.IsCaptureGrounded)
+                if (!grounded)
                 {
-                    Debug.LogWarning($"[Capture] Home view {view} unavailable: no grounded capsule at {pc.transform.position} (requested {feet}).");
+                    Debug.LogWarning($"[Capture] Home view {view} unavailable: no grounded capsule in the observed aisle candidates.");
                     _failedViews++;
                     continue;
                 }

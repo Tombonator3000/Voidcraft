@@ -105,6 +105,10 @@ namespace BlocksBeyondTheStars.Client
             }
         }
         public NetworkClient Network { get; private set; }
+
+        /// <summary>Raised after baseline handlers are attached and before connect/poll can dispatch a
+        /// first packet. Views initialized by WorldRig can subscribe without depending on Update order.</summary>
+        public event System.Action<NetworkClient> NetworkInitialized;
         public ClientWorld World { get; private set; }
         public BlockTextureAtlas Atlas { get; private set; }
 
@@ -2034,6 +2038,8 @@ namespace BlocksBeyondTheStars.Client
                 }
             };
             Network.ServerMessageReceived += m => { Debug.Log(m.Text); LastMessage = ServerMessageText(m.Text); };
+
+            NetworkInitialized?.Invoke(Network);
 
             // Connect now; the join handshake is sent once the transport reports Connected
             // (UDP connect is asynchronous — sending the join before that would be dropped).

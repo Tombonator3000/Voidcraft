@@ -50,6 +50,7 @@ public sealed partial class GameServer
         Vector3i origin;
         int ground;
         VeylTerrainPlan? terrainPlan = null;
+        var reserved = new List<(int Cx, int Cz, int Hw, int Hl)>();
         string seat = "buried";
         if (record is not null)
         {
@@ -59,7 +60,6 @@ public sealed partial class GameServer
         }
         else
         {
-            var reserved = new List<(int Cx, int Cz, int Hw, int Hl)>();
             foreach (var pad in _landingPads)
                 reserved.Add((pad.CenterX, pad.CenterZ, LandingPadRadius + 2, LandingPadRadius + 2));
             foreach (var m in _monuments)
@@ -115,29 +115,34 @@ public sealed partial class GameServer
         };
         if (record is null)
         {
+            var landscape = PlanVeylLandscape(structure, geometryVersion, origin, terrainPlan, reserved);
             var stampTimer = System.Diagnostics.Stopwatch.StartNew();
             int cellOperations = 0;
             _repo.RunInTransaction(() =>
             {
                 if (terrainPlan is not null) cellOperations = StampVeylTerrace(terrainPlan);
                 cellOperations += StampMonumentBlocks(placement, geometryVersion);
+                if (landscape.Terrain is not null) cellOperations += StampVeylTerrace(landscape.Terrain);
                 RecordPlacement(SurveyKind, 0, origin, ground, false, seat, "veyl_anchor", geometryVersion);
-                if (terrainPlan is not null)
+                var pinned = FindPlacementRecord(SurveyKind, 0)!;
+                pinned.LandscapeVersion = _worlds.Active.VirginAtLoad ? VeylBasaltLandformGenerator.LatestVersion : 0;
+                var reservation = landscape.Terrain ?? terrainPlan;
+                if (reservation is not null)
                 {
-                    var pinned = FindPlacementRecord(SurveyKind, 0)!;
                     pinned.Reservation = new StructureReservationBounds
                     {
-                        MinX = terrainPlan.Min.X,
-                        MinY = terrainPlan.Min.Y,
-                        MinZ = terrainPlan.Min.Z,
-                        MaxX = terrainPlan.Max.X,
-                        MaxY = terrainPlan.Max.Y,
-                        MaxZ = terrainPlan.Max.Z,
+                        MinX = reservation.Min.X,
+                        MinY = reservation.Min.Y,
+                        MinZ = reservation.Min.Z,
+                        MaxX = reservation.Max.X,
+                        MaxY = reservation.Max.Y,
+                        MaxZ = reservation.Max.Z,
                     };
                 }
                 SavePlacementRecords();
             });
-            _log.Info($"Veyl geometry v{geometryVersion}: {cellOperations} cell operations in {stampTimer.ElapsedMilliseconds} ms.");
+            _log.Info($"Veyl geometry v{geometryVersion}: {cellOperations} cell operations in {stampTimer.ElapsedMilliseconds} ms. " +
+                $"Landscape v{VeylBasaltLandformGenerator.LatestVersion}: {landscape.Prisms} prisms, {landscape.AddedCells} cells, {landscape.Outcome}.");
         }
         RegisterMonument(placement, "veyl_anchor");
         ReportStamp(SurveyKind, 1, 1);
@@ -216,6 +221,7 @@ public sealed partial class GameServer
             || _content.BlockById(_world.GetBlock(support)) is not { Solid: true }
             || ShapeCode.ShapeOf(_world.GetShape(support)) != 0) return;
         session.State.Milestones.Add(SurveyReturned);
+        bool firstSharedResponse = false;
         _repo.RunInTransaction(() =>
         {
             foreach (var contact in new[] { monument.SurfaceContact, monument.BuriedContact })
@@ -241,8 +247,12 @@ public sealed partial class GameServer
             {
                 MarkFeatureStamped(SurveySiteResponse);
                 RecordStoryMilestone();
+                firstSharedResponse = true;
             }
         });
+        // Never replay this transient event from snapshots or personal co-op acknowledgments.
+        // Send after the shared marker commits, in order after the two permanent contact deltas.
+        if (firstSharedResponse) BroadcastToWorld(CreateVeylSignalResponse(monument));
         RevealShapeAnomalyMemory(session); // existing pack-aware insight, still respects its spoiler gate
         SendVegaLine(session, "survey.veyl.return", 2);
         SendPlanetPois(session);

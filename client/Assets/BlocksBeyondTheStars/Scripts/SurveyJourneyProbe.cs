@@ -470,7 +470,7 @@ namespace BlocksBeyondTheStars.Client
             _navigationMemory.Observe(pos); // measured locomotion, never the planned route length
             if (_navigationMemory.Walked >= 256f)
             { Finish("failed", "navigation_goal_distance_budget_exhausted", 1); return false; }
-            if (HorizontalDistance(pos, goal) <= reach && (!matchHeight || Mathf.Abs(pos.y - goal.y) < 1.25f)) return true;
+            if (JourneyWalkPlanner.Arrived(pos, goal, reach, matchHeight)) return true;
             if (Vector3.Distance(pos, _progressPosition) > 0.2f)
             { _progressPosition = pos; _lastProgress = Time.realtimeSinceStartupAsDouble; }
             while (_path.Count > 0 && HorizontalDistance(pos, _path[0]) < 0.4f && Mathf.Abs(pos.y - _path[0].y) < 1.25f) _path.RemoveAt(0);

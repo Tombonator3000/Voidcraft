@@ -397,6 +397,8 @@ The Sleeper Signal can place an introductory Veyl site a short walk from a landi
 has a safe footprint. The dark basalt spire identifies the approach. Existing player buildings are never
 replaced to force a site into place; a body without a safe location may leave this discovery for another
 planet. The introductory survey is separate from the original recovered-log fragment.
+On fresh worlds, rough or wet ground can receive a supported basalt foundation and a dry stepped
+approach. Existing excavations and buildings are preserved.
 
 New sites lead down a long stepped approach into a hollow vault. Three ordinary blocks can repair a
 shortcut across the broken bridge, or you can follow the continuous side gallery without jumping. If
@@ -411,7 +413,9 @@ the actual station to use it; the medical spawn is no longer immediately within 
 2. Follow the open stair and excavate the buried contact. Leave enough room to stand in front of it, then
    scan nearby. Scanning through solid cover or from a remote location does not complete this step.
 3. Place a solid, shaped building block into the indicated socket on its solid support. A plain cube does
-   not restore the signal. The world inscription changes when the connection responds.
+   not restore the signal. The world inscription changes when the connection responds. The first shared
+   repair also sends a brief cyan pulse across surviving rune faces with a quiet positional sound.
+   **Reduced effects** replaces the traveling pulse with a gentle stationary fade.
 4. Return aboard your own ship to receive a terrain scanner and unlock its blueprint. If your pack is full,
    make one slot available; the reward remains pending and is granted once, without discarding items.
 5. The terrain scanner adds a through-terrain ore survey action. A physical sample on the workshop display
