@@ -67,25 +67,23 @@ namespace BlocksBeyondTheStars.Client
         /// live critters — they are client-local, so no other system knows they exist.</summary>
         public static MicroFaunaView Instance { get; private set; }
 
-        /// <summary>Nearest live critter within <paramref name="reach"/> of a WORLD position (#757), for the
-        /// handheld scanner. Critter positions are canonical world coordinates (same frame as
-        /// <see cref="GameBootstrap.PlayerPosition"/>).</summary>
-        public bool NearestCritter(Vector3 worldPos, float reach, out string kindKey, out Vector3 worldAt)
+        /// <summary>Nearest visible critter intersected by a scene-space ray, bounded by any nearer
+        /// aimed voxel or large creature. Canonical positions are wrapped into the player's scene.</summary>
+        public bool AimedCritter(Ray ray, float reach, out string kindKey, out Vector3 worldAt)
         {
             kindKey = null;
             worldAt = default;
-            float bestSq = reach * reach;
+            if (Game == null) return false;
+            float best = reach;
             foreach (var c in _alive)
             {
-                float d = (c.WorldPos - worldPos).sqrMagnitude;
-                if (d < bestSq)
-                {
-                    bestSq = d;
-                    kindKey = c.Kind.Key;
-                    worldAt = c.WorldPos;
-                }
+                Vector3 center = Game.ScenePos(c.WorldPos.x, c.WorldPos.y, c.WorldPos.z);
+                if (!ScanRay.SphereEntry(ray, center, Mathf.Max(0.04f, c.Kind.Size * c.SizeScale), out float distance)
+                    || distance >= best) continue;
+                best = distance;
+                kindKey = c.Kind.Key;
+                worldAt = c.WorldPos;
             }
-
             return kindKey != null;
         }
 

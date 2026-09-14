@@ -242,6 +242,7 @@ namespace BlocksBeyondTheStars.Client
 
         /// <summary>Whether we're currently inside the ship (authoritative; enables cargo crafting).</summary>
         public bool Aboard { get; private set; }
+        public bool VeylSurveyComplete { get; private set; }
         public bool InEva { get; private set; } // server-authoritative: floating outside the ship in space
 
         /// <summary>When set, the on-foot player is above the atmosphere (zero-g) and must float instead of
@@ -748,13 +749,40 @@ namespace BlocksBeyondTheStars.Client
             return best;
         }
 
-        /// <summary>The station the player is looking AT: raycast forward and return the station nearest the
-        /// hit point (so a cramped ship's many stations don't all read as the one you happen to stand on).
-        /// Empty if the aim doesn't land on a station. Used in preference to <see cref="NearestStationType"/>.</summary>
+        private StationDecorView _stationDecorPicker;
+
+        /// <summary>Pick the visible station fixture, with world/door occlusion, before falling back to
+        /// a physical marker hit. Used in preference to <see cref="NearestStationType"/>.</summary>
         public string LookedStationType(Camera cam, float range)
         {
-            if (cam == null || Stations.Length == 0
-                || !Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, range))
+            if (cam == null || Stations.Length == 0 || range <= 0f)
+            {
+                return string.Empty;
+            }
+
+            var ray = new Ray(cam.transform.position, cam.transform.forward);
+            bool hitWorld = Physics.Raycast(ray, out var hit, range, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            if (_stationDecorPicker == null)
+            {
+                _stationDecorPicker = GetComponentInParent<StationDecorView>();
+            }
+
+            if (_stationDecorPicker != null)
+            {
+                if (_stationDecorPicker.TryPick(this, ray, range, hitWorld ? hit.distance : range, out string fixtureType, out bool occluded))
+                {
+                    return fixtureType;
+                }
+
+                // A ray deliberately aimed at a fixture behind a wall must not reselect it through
+                // the approximate marker-distance fallback below. Proximity remains a separate path.
+                if (occluded)
+                {
+                    return string.Empty;
+                }
+            }
+
+            if (!hitWorld)
             {
                 return string.Empty;
             }
@@ -1328,8 +1356,53 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>Seconds since the last chunk streamed in — grows only once the server has finished the view.</summary>
         public float TimeSinceLastChunk => Time.time - _lastChunkArrivalTime;
 
-        /// <summary>Chunks still queued to be (re)meshed — the client-side mesh backlog.</summary>
-        public int PendingMeshCount => _dirty.Count;
+        /// <summary>All queued and executing terrain work, including uploads and collision cooking.
+        /// Read worker counts before their completion queues: workers enqueue before decrementing so
+        /// the main thread cannot mistake a hand-off for an empty pipeline.</summary>
+        public int PendingMeshCount => DirtyChunkCount + OutstandingChunkWork;
+        public int DirtyChunkCount => _dirty.Count;
+        public int MeshBuildsInFlight => System.Threading.Volatile.Read(ref _meshBuildsInFlight);
+        public int PendingMeshUploads => _builtChunks.Count + _readyBuiltChunks.Count;
+        public int ColliderBakesInFlight => System.Threading.Volatile.Read(ref _colliderBakesInFlight);
+        public int PendingColliderAssignments => _bakedColliders.Count + _readyBakedColliders.Count;
+        public int OutstandingChunkWork => MeshBuildsInFlight + PendingMeshUploads
+            + ColliderBakesInFlight + PendingColliderAssignments;
+        public int ChunkMeshFailureCount => _meshFailCounts.Count;
+        public int LoadedChunkObjectCount => _chunkObjects.Count;
+        public float LastMeshDispatchMs { get; private set; }
+        public float LastMeshUploadMs { get; private set; }
+        public float LastColliderAssignmentMs { get; private set; }
+        public int LastMeshDispatchCount { get; private set; }
+        public int LastMeshUploadCount { get; private set; }
+        public int LastColliderAssignmentCount { get; private set; }
+
+        // Initial budgets reserve 5 ms of a 16.7 ms frame for terrain main-thread work. A single
+        // upload/cook cannot be pre-empted, so each nonempty stage always makes one item's progress;
+        // the probe reports actual stage times, including any such overrun. Count caps also bound
+        // cheap/stale work, and back-pressure prevents workers outrunning the upload/collision stages.
+        private const double MeshDispatchBudgetMs = 2.0;
+        private const double MeshUploadBudgetMs = 2.0;
+        private const double ColliderAssignmentBudgetMs = 1.0;
+        private const int MeshUploadsPerFrame = 2;
+        private const int ColliderAssignmentsPerFrame = 4;
+        private const int MaxOutstandingChunkWork = 16;
+        private readonly Dictionary<ChunkCoord, long> _dirtyOrder = new Dictionary<ChunkCoord, long>();
+        private long _nextDirtyOrder;
+        private int _nearDispatches;
+
+        private static double WorkElapsedMs(long start) =>
+            (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+        private void QueueChunkBuild(ChunkCoord coord)
+        {
+            if (_dirty.Add(coord)) _dirtyOrder[coord] = _nextDirtyOrder++;
+        }
+
+        private void ForgetQueuedChunk(ChunkCoord coord)
+        {
+            _dirty.Remove(coord);
+            _dirtyOrder.Remove(coord);
+        }
 
         // Performance (P1): cap how many chunk meshes are (re)built per frame so a burst of chunks arriving
         // while moving fast spreads over several frames instead of stalling one. Nearest chunks build first;
@@ -1372,6 +1445,9 @@ namespace BlocksBeyondTheStars.Client
         private readonly Dictionary<ChunkCoord, int> _colliderGen = new Dictionary<ChunkCoord, int>();
         private readonly System.Collections.Concurrent.ConcurrentQueue<(ChunkCoord Coord, Mesh Collider, int Gen, int Epoch)> _bakedColliders
             = new System.Collections.Concurrent.ConcurrentQueue<(ChunkCoord Coord, Mesh Collider, int Gen, int Epoch)>();
+        private readonly ChunkCompletionQueue<(ChunkCoord Coord, Mesh Collider, int Gen, int Epoch)> _readyBakedColliders
+            = new ChunkCompletionQueue<(ChunkCoord Coord, Mesh Collider, int Gen, int Epoch)>();
+        private int _colliderBakesInFlight;
 
         // Performance (A2): build the chunk GEOMETRY off the main thread too (the heavy triple-loop + coloured
         // light flood-fill). DispatchChunkBuild snapshots the chunk neighbourhood on the main thread, runs
@@ -1382,6 +1458,9 @@ namespace BlocksBeyondTheStars.Client
         private readonly Dictionary<ChunkCoord, int> _meshGen = new Dictionary<ChunkCoord, int>();
         private readonly System.Collections.Concurrent.ConcurrentQueue<(ChunkCoord Coord, ChunkMeshData Data, int Gen, int Epoch, string Error)> _builtChunks
             = new System.Collections.Concurrent.ConcurrentQueue<(ChunkCoord Coord, ChunkMeshData Data, int Gen, int Epoch, string Error)>();
+        private readonly ChunkCompletionQueue<(ChunkCoord Coord, ChunkMeshData Data, int Gen, int Epoch, string Error)> _readyBuiltChunks
+            = new ChunkCompletionQueue<(ChunkCoord Coord, ChunkMeshData Data, int Gen, int Epoch, string Error)>();
+        private int _meshBuildsInFlight;
 
         // Failed-build retry bookkeeping (#421 M10): a build that faulted on the worker re-enters _dirty (the
         // coord was already removed at dispatch, so dropping it silently would leave a permanent un-meshed,
@@ -1453,7 +1532,7 @@ namespace BlocksBeyondTheStars.Client
             if (atlasShader != null)
             {
                 ChunkMaterial = new Material(atlasShader) { mainTexture = Atlas.Texture };
-                ChunkMaterial.SetTexture("_NormalTex", Atlas.NormalTexture); // per-pixel normal mapping
+                Atlas.BindMaterial(ChunkMaterial);
 
                 // Alpha-blended material for the see-through submesh (glass viewports + energy fields).
                 var transparentShader = Shader.Find("BlocksBeyondTheStars/BlockAtlasTransparent");
@@ -1574,7 +1653,7 @@ namespace BlocksBeyondTheStars.Client
                 CustomShapes.Register(m.Id, m.Voxels, m.Name, m.Owner);
                 foreach (var c in _chunkObjects.Keys)
                 {
-                    _dirty.Add(c); // a new or wiped form changes geometry, so loaded chunks must re-mesh
+                    QueueChunkBuild(c); // a new or wiped form changes geometry, so loaded chunks must re-mesh
                 }
 
                 ShapeIconFactory.ClearCache(); // icons are keyed by (tile, form) — a reused id must not serve stale art
@@ -1591,7 +1670,7 @@ namespace BlocksBeyondTheStars.Client
                 {
                     foreach (var c in _chunkObjects.Keys)
                     {
-                        _dirty.Add(c); // wiped design: rebuild loaded chunks so its faces fall back to the block texture
+                        QueueChunkBuild(c); // wiped design: rebuild loaded chunks so its faces fall back to the block texture
                     }
                 }
             };
@@ -1762,6 +1841,9 @@ namespace BlocksBeyondTheStars.Client
                         Origin = new Vector3i(m.OriginX, m.OriginY, m.OriginZ),
                         Hull = m.Hull,
                         Width = m.Width, Height = m.Height, Length = m.Length,
+                        HasVeylSpecimen = m.HasVeylSpecimen,
+                        SpecimenDock = new Vector3(m.SpecimenX, m.SpecimenY, m.SpecimenZ),
+                        SpecimenYaw = m.SpecimenYaw,
                     };
                     bool hasTint = m.Tint != null && m.Tint.Length == m.Block.Length;
                     bool hasGlow = m.Glow != null && m.Glow.Length == m.Block.Length;
@@ -2029,39 +2111,11 @@ namespace BlocksBeyondTheStars.Client
                 }
             }
 
-            // Upload + assign chunk geometry whose async build finished (A2), then assign collision meshes whose
-            // async bake finished (both cheap on the main thread — the heavy work ran on worker threads).
-            DrainBuiltChunks();
+            // Complete collision work first to prioritize usable footing; uploads and dispatches then
+            // each get a bounded slice. Worker execution itself is outside these main-thread timings.
             DrainBakedColliders();
-
-            // Kick off off-thread (re)builds for chunks that changed, but cap how many we DISPATCH per frame (P1)
-            // so a burst of chunks arriving while moving fast spreads over several frames instead of stalling one.
-            // Nearest chunks build first; chunks past the budget stay queued for the next frames.
-            if (_dirty.Count > 0)
-            {
-                _dirtyScratch.Clear();
-                _dirtyScratch.AddRange(_dirty);
-                var pp = PlayerPosition;
-                _dirtyScratch.Sort((a, b) => ChunkDistSqToPlayer(a, pp).CompareTo(ChunkDistSqToPlayer(b, pp)));
-
-                int budget = Mathf.Max(1, MeshChunksPerFrame);
-                int built = 0;
-                foreach (var coord in _dirtyScratch)
-                {
-                    if (built >= budget)
-                    {
-                        break;
-                    }
-
-                    // Neighbours not yet streamed are no-ops — flush them without spending budget; they
-                    // re-mark themselves dirty once their own data arrives.
-                    _dirty.Remove(coord);
-                    if (DispatchChunkBuild(coord))
-                    {
-                        built++;
-                    }
-                }
-            }
+            DrainBuiltChunks();
+            DispatchQueuedChunks();
 
             // Round worlds: keep every loaded chunk drawn at the copy nearest the player as it laps the world
             // in EITHER direction. Near chunks resolve to their canonical position (a no-op write); only
@@ -2150,7 +2204,7 @@ namespace BlocksBeyondTheStars.Client
                 }
 
                 _chunkObjects.Remove(coord);
-                _dirty.Remove(coord);
+                ForgetQueuedChunk(coord);
                 _colliderGen.Remove(coord);
                 _meshGen.Remove(coord);
                 _meshFailCounts.Remove(coord);
@@ -2188,10 +2242,10 @@ namespace BlocksBeyondTheStars.Client
         /// Cheap: only chunks that already have a mesh actually rebuild.</summary>
         private void MarkChunkAndNeighborsDirty(ChunkCoord coord)
         {
-            _dirty.Add(coord);
+            QueueChunkBuild(coord);
             foreach (var d in _faceDirs)
             {
-                _dirty.Add(new ChunkCoord(
+                QueueChunkBuild(new ChunkCoord(
                     WorldConstants.CanonicalChunkX(coord.X + d.X, Circumference),
                     coord.Y + d.Y,
                     WorldConstants.CanonicalChunkZ(coord.Z + d.Z, Circumference)));
@@ -2268,6 +2322,8 @@ namespace BlocksBeyondTheStars.Client
             // world's robots keep growling/firing here, stale beacons/bases/factories linger on the map, and
             // ghost speeders keep offering their board prompt (issue #412 M5). The views prune ids missing
             // from these arrays, so clearing despawns the stale objects.
+            Stations = System.Array.Empty<NetShipStation>();
+            PlanetPois = System.Array.Empty<NetPoi>();
             PlanetEnemies = System.Array.Empty<NetCombatEntity>();
             Creatures = System.Array.Empty<NetCreature>();
             Npcs = System.Array.Empty<NetNpc>();
@@ -2301,6 +2357,8 @@ namespace BlocksBeyondTheStars.Client
 
             _chunkObjects.Clear();
             _dirty.Clear();
+            _dirtyOrder.Clear();
+            _nearDispatches = 0;
             // Mesh/bake bookkeeping for the old world is now stale; WorldEpoch (bumped below) fences any
             // in-flight off-thread builds + bakes so they're dropped in DrainBuiltChunks/DrainBakedColliders
             // instead of landing on the new world's chunks.
@@ -2406,7 +2464,7 @@ namespace BlocksBeyondTheStars.Client
                 Player.LiftOutOfBlockAt(m.X, m.Y, m.Z);
             }
 
-            _dirty.Add(coord);
+            QueueChunkBuild(coord);
 
             // A block on a chunk edge also changes the NEIGHBOUR chunk's face toward it. Re-mesh that
             // neighbour too — otherwise mining a boundary block leaves the adjacent chunk's now-exposed
@@ -2419,7 +2477,7 @@ namespace BlocksBeyondTheStars.Client
                     WorldConstants.CanonicalChunkZ(WorldConstants.WorldToChunk(m.Z + d.Z), Circumference));
                 if (!nc.Equals(coord))
                 {
-                    _dirty.Add(nc);
+                    QueueChunkBuild(nc);
                 }
             }
         }
@@ -2448,6 +2506,7 @@ namespace BlocksBeyondTheStars.Client
 
             _wasAboard = m.AboardShip;
             Aboard = m.AboardShip;
+            VeylSurveyComplete = m.VeylSurveyComplete;
             InEva = m.InEva;
             InSpeeder = m.InSpeeder ?? string.Empty;
 
@@ -2483,6 +2542,44 @@ namespace BlocksBeyondTheStars.Client
             }
             AiCoreTier = m.AiCoreTier;
             ServerSpawn ??= new Vector3(m.X, m.Y, m.Z);
+        }
+
+        private void DispatchQueuedChunks()
+        {
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            LastMeshDispatchCount = 0;
+            if (_dirty.Count > 0 && OutstandingChunkWork < MaxOutstandingChunkWork)
+            {
+                _dirtyScratch.Clear();
+                _dirtyScratch.AddRange(_dirty);
+                var player = PlayerPosition;
+                _dirtyScratch.Sort((a, b) => ChunkDistSqToPlayer(a, player).CompareTo(ChunkDistSqToPlayer(b, player)));
+                int examined = 0;
+                int limit = Mathf.Max(1, MeshChunksPerFrame);
+                while (_dirtyScratch.Count > 0 && LastMeshDispatchCount < limit
+                    && OutstandingChunkWork < MaxOutstandingChunkWork
+                    && (examined == 0 || WorkElapsedMs(start) < MeshDispatchBudgetMs))
+                {
+                    // Every eighth successful dispatch serves the oldest dirty chunk, so a constant
+                    // stream of nearby edits cannot starve distant terrain. Most dispatches stay near-first.
+                    int index = 0;
+                    if (_nearDispatches >= 7)
+                    {
+                        for (int i = 1; i < _dirtyScratch.Count; i++)
+                            if (_dirtyOrder[_dirtyScratch[i]] < _dirtyOrder[_dirtyScratch[index]]) index = i;
+                    }
+                    var coord = _dirtyScratch[index];
+                    _dirtyScratch.RemoveAt(index);
+                    ForgetQueuedChunk(coord);
+                    examined++;
+                    if (DispatchChunkBuild(coord))
+                    {
+                        LastMeshDispatchCount++;
+                        _nearDispatches = _nearDispatches >= 7 ? 0 : _nearDispatches + 1;
+                    }
+                }
+            }
+            LastMeshDispatchMs = (float)WorkElapsedMs(start);
         }
 
         /// <summary>(A2) Kicks off an OFF-THREAD geometry build for one chunk; returns false (no work, no budget
@@ -2601,8 +2698,10 @@ namespace BlocksBeyondTheStars.Client
                 }
 
                 _builtChunks.Enqueue((capturedCoord, data, gen, epoch, error));
+                System.Threading.Interlocked.Decrement(ref _meshBuildsInFlight);
             }
 
+            System.Threading.Interlocked.Increment(ref _meshBuildsInFlight);
 #if UNITY_WEBGL && !UNITY_EDITOR
             // WebGL: no worker threads — build inline on the main thread. DrainBuiltChunks still uploads the
             // result next frame, exactly as it does for the async path on every other platform.
@@ -2642,8 +2741,15 @@ namespace BlocksBeyondTheStars.Client
         /// superseded or world-changed builds). Mirrors <see cref="DrainBakedColliders"/>.</summary>
         private void DrainBuiltChunks()
         {
-            while (_builtChunks.TryDequeue(out var built))
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            LastMeshUploadCount = 0;
+            while (_builtChunks.TryDequeue(out var completed)) _readyBuiltChunks.Enqueue(completed);
+            var player = PlayerPosition;
+            while (LastMeshUploadCount < MeshUploadsPerFrame
+                && (LastMeshUploadCount == 0 || WorkElapsedMs(start) < MeshUploadBudgetMs)
+                && _readyBuiltChunks.TryDequeue(x => ChunkDistSqToPlayer(x.Coord, player), out var built))
             {
+                LastMeshUploadCount++;
                 if (built.Data == null)
                 {
                     // Failed build (#421 M10): the coord already left _dirty at dispatch, so dropping it here
@@ -2657,7 +2763,7 @@ namespace BlocksBeyondTheStars.Client
                         _meshFailCounts[built.Coord] = fails;
                         if (fails <= MaxMeshBuildRetries)
                         {
-                            _dirty.Add(built.Coord);
+                            QueueChunkBuild(built.Coord);
                         }
 
                         // Rate-limited: one line per interval however many chunks fail, plus one final line for
@@ -2686,6 +2792,7 @@ namespace BlocksBeyondTheStars.Client
                 // pooled geometry buffers can go back for the next build.
                 built.Data.Release();
             }
+            LastMeshUploadMs = (float)WorkElapsedMs(start);
         }
 
         /// <summary>Main-thread upload of a built chunk: turns the <see cref="ChunkMeshData"/> into the render
@@ -2775,6 +2882,7 @@ namespace BlocksBeyondTheStars.Client
                 var capturedCoord = coord;
                 var capturedCollider = collider;
                 int epoch = WorldEpoch;
+                System.Threading.Interlocked.Increment(ref _colliderBakesInFlight);
                 System.Threading.Tasks.Task.Run(() =>
                 {
                     try
@@ -2787,6 +2895,7 @@ namespace BlocksBeyondTheStars.Client
                     }
 
                     _bakedColliders.Enqueue((capturedCoord, capturedCollider, bakeGen, epoch));
+                    System.Threading.Interlocked.Decrement(ref _colliderBakesInFlight);
                 });
 #endif
             }
@@ -2797,8 +2906,15 @@ namespace BlocksBeyondTheStars.Client
         /// chunk GameObject is gone — so a stale cook never lands on the wrong chunk.</summary>
         private void DrainBakedColliders()
         {
-            while (_bakedColliders.TryDequeue(out var baked))
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            LastColliderAssignmentCount = 0;
+            while (_bakedColliders.TryDequeue(out var completed)) _readyBakedColliders.Enqueue(completed);
+            var player = PlayerPosition;
+            while (LastColliderAssignmentCount < ColliderAssignmentsPerFrame
+                && (LastColliderAssignmentCount == 0 || WorkElapsedMs(start) < ColliderAssignmentBudgetMs)
+                && _readyBakedColliders.TryDequeue(x => ChunkDistSqToPlayer(x.Coord, player), out var baked))
             {
+                LastColliderAssignmentCount++;
                 bool assigned = false;
                 if (baked.Epoch == WorldEpoch
                     && _colliderGen.TryGetValue(baked.Coord, out var gen) && gen == baked.Gen
@@ -2823,6 +2939,7 @@ namespace BlocksBeyondTheStars.Client
                     Destroy(baked.Collider); // superseded / world changed / chunk gone → free the throwaway mesh
                 }
             }
+            LastColliderAssignmentMs = (float)WorkElapsedMs(start);
         }
 
         /// <summary>Squared distance from the player to a chunk's centre, using the same seam-aware scene

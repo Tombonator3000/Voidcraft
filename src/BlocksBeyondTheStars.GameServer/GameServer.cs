@@ -573,6 +573,7 @@ public sealed partial class GameServer
                 if (_config.PlaceMonuments)
                 {
                     StampMonuments(); // eroded rune relics (unprotected) — the only surface feature airless bodies get
+                    StampVeylSurvey();
                 }
 
                 if (_config.PlaceFactories)
@@ -3720,6 +3721,7 @@ public sealed partial class GameServer
 
         SendInventory(session);
         OnAchievementBuild(session);
+        VeylSurveyOnPlace(session, pos);
     }
 
     private void HandleCraft(PlayerSession session, CraftIntent craft)
@@ -4866,6 +4868,7 @@ public sealed partial class GameServer
             SuitEnergy = p.SuitEnergy,
             Hunger = p.Hunger,
             AboardShip = p.AboardShip,
+            VeylSurveyComplete = p.Milestones.Contains(SurveyRewarded),
             InEva = p.InEva,
             AboveAtmosphere = p.AboveAtmosphere,
             SuitClimateActive = p.SuitClimateActive,

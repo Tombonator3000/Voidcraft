@@ -8,8 +8,8 @@ namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// Mining/placing feedback (M27 polish): a wireframe selection box on the block the player is
-    /// looking at, and a small debris burst when a block is mined or placed. Code-built (12 thin
-    /// edge cubes + cube particles) on the always-included Unlit/Color shader — no assets, no new
+    /// looking at, and a small debris burst when a block is mined or placed. Code-built (one mesh for
+    /// twelve thin edges + particles) on the always-included Unlit/Color shader — no assets, no new
     /// shader. Render-only; the server stays authoritative over the actual block changes.
     /// </summary>
     public sealed class MiningFx : MonoBehaviour
@@ -19,6 +19,8 @@ namespace BlocksBeyondTheStars.Client
         public float Reach = 6f;
 
         private GameObject _outline;
+        private Mesh _outlineMesh;
+        private static readonly Color SelectionColor = new(0.28f, 0.52f, 0.58f);
         private Material _outlineMat;
         private Material _digMat;
         private Material _placeMat;
@@ -27,11 +29,12 @@ namespace BlocksBeyondTheStars.Client
 
         private void Start()
         {
-            _outlineMat = Mat(new Color(0.05f, 0.05f, 0.06f));
+            _outlineMat = Mat(SelectionColor);
             _digMat = Mat(new Color(0.65f, 0.58f, 0.48f));
             _placeMat = Mat(new Color(0.80f, 0.85f, 0.95f));
             _flashMat = Mat(new Color(1f, 0.86f, 0.5f));
-            _outline = BuildWireCube(_outlineMat);
+            _outline = BuildWireCube(_outlineMat, out _outlineMesh);
+            _outline.transform.SetParent(transform, false);
             _outline.SetActive(false);
         }
 
@@ -64,9 +67,9 @@ namespace BlocksBeyondTheStars.Client
                 _outline.transform.position = new Vector3(bx + 0.5f, by + 0.5f, bz + 0.5f);
                 _outline.SetActive(true);
 
-                // Tint the box from dark toward hot orange as the block cracks under the drill.
+                // A thin muted outline leaves glass useful; orange still communicates mining progress.
                 float frac = (bx == _crackX && by == _crackY && bz == _crackZ && Time.time - _crackAt < 0.4f) ? _crackFrac : 0f;
-                _outlineMat.color = Color.Lerp(new Color(0.05f, 0.05f, 0.06f), new Color(1f, 0.45f, 0.12f), frac);
+                _outlineMat.color = ShaderColor.Srgb(Color.Lerp(SelectionColor, new Color(1f, 0.45f, 0.12f), frac));
             }
             else
             {
@@ -263,11 +266,16 @@ namespace BlocksBeyondTheStars.Client
             return tex;
         }
 
-        private static GameObject BuildWireCube(Material mat)
+        private static GameObject BuildWireCube(Material mat, out Mesh mesh)
         {
-            const float t = 0.05f;   // edge thickness
+            const float t = 0.015f;   // edge thickness
             const float s = 1.04f;    // edge length (slightly proud of the block)
             var root = new GameObject("BlockOutline");
+            var source = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            source.SetActive(false);
+            var cube = source.GetComponent<MeshFilter>().sharedMesh;
+            var edges = new CombineInstance[12];
+            int index = 0;
 
             // Twelve edges of a unit cube centred on the root: 4 along each axis.
             for (int a = 0; a < 3; a++)
@@ -281,16 +289,35 @@ namespace BlocksBeyondTheStars.Client
                     else if (a == 1) { pos = new Vector3(u, 0f, v); scale = new Vector3(t, s, t); }
                     else { pos = new Vector3(u, v, 0f); scale = new Vector3(t, t, s); }
 
-                    var edge = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    StripCollider(edge);
-                    edge.transform.SetParent(root.transform, false);
-                    edge.transform.localPosition = pos;
-                    edge.transform.localScale = scale;
-                    edge.GetComponent<Renderer>().sharedMaterial = mat;
+                    edges[index++] = new CombineInstance { mesh = cube,
+                        transform = Matrix4x4.TRS(pos, Quaternion.identity, scale) };
                 }
             }
 
+            mesh = new Mesh { name = "Block selection edges" };
+            mesh.CombineMeshes(edges, true, true);
+            root.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = root.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = mat;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            Destroy(source);
             return root;
+        }
+
+        private void OnDestroy()
+        {
+            if (_subscribed && Game?.Network != null)
+            {
+                Game.Network.BlockChanged -= OnBlock;
+                Game.Network.MiningProgressReceived -= OnMineProgress;
+            }
+            if (_outline != null) Destroy(_outline);
+            if (_outlineMesh != null) Destroy(_outlineMesh);
+            if (_outlineMat != null) Destroy(_outlineMat);
+            if (_digMat != null) Destroy(_digMat);
+            if (_placeMat != null) Destroy(_placeMat);
+            if (_flashMat != null) Destroy(_flashMat);
         }
 
         private static Material Mat(Color c)

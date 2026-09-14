@@ -389,6 +389,9 @@ namespace BlocksBeyondTheStars.Client
         {
             "settlement" => ("⌂", new Color(0.5f, 0.95f, 0.6f), "map_settlement"),
             "settlement_ruin" => ("⌂", new Color(0.65f, 0.6f, 0.55f), "map_ruin"),
+            "veyl_signal" or "veyl_excavate" or "veyl_shape" => ("◆", new Color(0.40f, 0.95f, 0.89f), "map_ruin"),
+            "veyl_return" => ("◆", new Color(0.95f, 0.74f, 0.40f), "map_pad"),
+            "veyl_complete" => ("◆", new Color(0.62f, 0.77f, 0.73f), "map_ruin"),
             "vault_ruin" => ("◆", new Color(0.8f, 0.7f, 0.95f), "map_ruin"),
             "wreck" => ("✖", new Color(1f, 0.55f, 0.3f), "map_wreck"),
             "treasure" => ("◈", new Color(1f, 0.8f, 0.25f), null), // NPC-hint reveal; no icon yet → glyph renders

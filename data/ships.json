@@ -3,7 +3,8 @@
     "key": "starter", "nameKey": "ship.starter.name", "descriptionKey": "ship.starter.desc",
     "baseHull": 100, "baseShield": 25,
     "flightSpeed": 1.0, "handling": 1.0,
-    "interiorWidth": 5, "interiorLength": 7, "height": 4, "cargoSlots": 48,
+    "interiorWidth": 6, "interiorLength": 11, "height": 4, "cargoSlots": 48,
+    "layout": "ship_starter_home",
     "startModules": [ "cockpit", "reactor", "life_support", "workshop", "medbay", "quarters", "cargo_hold_basic", "ship_laser_basic", "tractor_beam" ]
   },
   {

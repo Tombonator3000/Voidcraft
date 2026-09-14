@@ -1,6 +1,7 @@
 {
   "id": "voidcraft_awakening",
   "nameKey": "story.voidcraft_awakening.name",
+  "surveyRewardItemKey": "terrain_scanner",
   "fragmentWeight": 3,
   "killWeight": 1,
   "milestoneWeight": 2,

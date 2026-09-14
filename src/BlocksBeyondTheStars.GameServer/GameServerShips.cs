@@ -39,6 +39,7 @@ public sealed partial class GameServer
         var ship = new ShipState
         {
             ShipType = def.Key,
+            StructureVersion = def.Key == "starter" ? 1 : 0,
             CurrentLocationId = _meta.DefaultPlanetType,
             Hull = def.BaseHull,
             Shield = 0f,

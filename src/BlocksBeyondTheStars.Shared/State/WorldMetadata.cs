@@ -130,6 +130,8 @@ public sealed class StructurePlacementRecord
     public int X { get; set; }                        // structure-local (0,0,0) world column (vaults: shaft centre)
     public int GroundY { get; set; }
     public int Z { get; set; }
+    /// <summary>Zero retains the original geometry of saves written before versioned structures.</summary>
+    public int GeometryVersion { get; set; }
     public bool OnIsland { get; set; }
     public string Seat { get; set; } = "legacy";      // seat style: legacy|flat|slope|shelf|stilts|lava|island|buried|wellhead
     public string Name { get; set; } = string.Empty;  // display name (derives from rng draws AFTER the search, so it must be pinned too)

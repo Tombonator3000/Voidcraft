@@ -152,8 +152,7 @@ public sealed class ShipStructureTests : IDisposable
     [Fact]
     public void ShipHatch_IsAnEnergyDoor_CentredOnTheHull()
     {
-        // Item 35: the box ship's outer hatch is an energy door, and its 3-wide opening is centred on the hull
-        // (cx+0.5), not half a block off-centre like the old 2-wide gap.
+        // Both even-width authored hulls and odd-width legacy boxes must centre the energy door on the hull.
         var server = Started(placeShip: true, out var repo);
         using (repo)
         {
@@ -165,7 +164,8 @@ public sealed class ShipStructureTests : IDisposable
 
             Assert.NotEqual(0, hatch.Id);
             Assert.Equal("energy", hatch.Kind);                         // the hatch is an energy door
-            Assert.InRange(hatch.Pos.X - a.X, 0.25f, 0.75f);            // centred on the hull (cx+0.5), not cx-0.5
+            var (origin, size) = server.LandedShipBoundsForTest("Host");
+            Assert.Equal(origin.X + size.X / 2f, hatch.Pos.X);
         }
     }
 

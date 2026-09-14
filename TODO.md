@@ -13,13 +13,118 @@ tests in Release, and a per-test duration guardrail (`scripts/check-test-duratio
 The server suite is sharded across a 4-runner matrix (`scripts/partition-tests.py` + checked-in weights; `Tests passed` is the required fan-in check) — PR gate ~4½ min.
 A PR touching nothing but `data/locales/*.json` runs a single narrow `locale-tests` job instead of the matrix (`scripts/locale-test-filter.py`, ~140 tests).
 **Conventions:** English docs/comments; in-game text localized via locale keys — EN+DE mandatory-complete,
-FR/ES/PT/PL/TR/NL/RU/UK/ZH/JA/KO machine-first-pass, IT community + machine top-up (see docs/developer/TRANSLATION_GUIDE.md); commit to `main` with the
-Claude `Co-Authored-By` trailer; OpenAI texture + ElevenLabs sound generation is blanket-approved
-(no per-batch gate).
+FR/ES/PT/PL/TR/NL/RU/UK/ZH/JA/KO machine-first-pass, IT community + machine top-up (see docs/developer/TRANSLATION_GUIDE.md).
+Use feature branches and reviewed pull requests, with truthful authorship. New images for this work must
+use built-in ChatGPT image generation; Magnific is not authorized. Historical upstream service allowances
+are not a spending allowance for this implementation.
 
 Architecture: Unity 6 (URP since 2026-06-10) client + authoritative .NET 10 server, everything built in
 code (no scene authoring). One shared world; MessagePack networking for native clients plus a WebGL JSON
 envelope at the WebSocket edge; deterministic seed world-gen; SQLite default persistence with opt-in PostgreSQL.
+
+---
+
+## Concept implementation — 2026-09-14 (in progress)
+
+Working branch: `feat/concept-visual-upgrade`, based on the playable fork at
+`9feb2f38feee0810f163a003fffb83532d287a0c`. The upstream-like `main` was inspected during the assessment,
+but is not the canonical playable baseline. Keep existing playable story and graphics work.
+Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md).
+
+**Implemented in the working tree; visual and performance acceptance pending**
+
+- Independent physical height, roughness, metal and emission apertures for 27 common surfaces, including
+  basalt, ceramic ship walls, industrial floors, stone/runes, ice/crystal, lamps and quiet soil/grass. Shared 128-pixel atlas
+  retains legacy 64-pixel asset inputs and tile identities; normals stop at tile boundaries.
+- Material maps bound in gameplay, menu and intro, including the active URP parallax variant.
+- Restrained bloom and vignette candidate; lamp housings no longer inherit the whole emitter mask.
+- Optional contextual HUD: relevant resource gauges, held-tool/device-aware hints, separate Veyl direction
+  and objective readout, with EN/DE localization and persistence validation still pending.
+- Cached chamfered equipment and station fixtures, first-person padded glove/wrist, stable drill contact,
+  scene-lit ceramic/graphite/metal finishes, clear viewports and detailed doors with capsule-clearance gating.
+- Server-owned Veyl scan/excavate/supported-shape/response/homecoming loop. Co-op visitors can acknowledge
+  an existing repair; shared story response is credited once, while each explorer earns their own reward.
+  Specimens remain on the particular owned homecoming vessel and replicate to observers.
+- Corrected HUD camera setup: transparent UI no longer inherits full-screen SSAO, depth/opaque copies,
+  scene shadows or post. Smaller chromatic fringe keeps text readable. Savings are not measured yet.
+- All short creature voice-bank clips now request readable mono decompression for runtime voice
+  processing; the existing call importers were already configured correctly.
+- Performance probe now records movement/aboard state, terrain chunk coverage, raw frame times, memory
+  and supported rendering counters. Optional terrain preparation is labeled as scripted setup and a run
+  fails its traversal gate if actual movement is insufficient. Additional concept captures are likewise
+  explicitly separate from new-player journey verification.
+
+- New ships use an authored 6×11 m home layout with a 2 m aisle, framed cockpit, inward fixtures and safe
+  spawn. Persisted version zero preserves the original starter geometry and edits; repair follows the version.
+- New Veyl sites have a real buried vault, stepped frames, suspended voxel Anchor, open descending stair,
+  a repairable bridge shortcut, continuous two-meter side route and recoverable pit. Existing sites retain
+  their original geometry and marker version, including the version-two continuous central bridge.
+- Full real-input expedition/reload driver and explicit terrain queue readiness are implemented but await
+  complete player journey verification. Frame budgets and queue backpressure have no measured savings yet.
+
+**Evidence obtained**
+
+- Exact Unity 6000.4.9f1 and .NET SDK 10.0.401 installed in isolated tool locations; no engine upgrade.
+- Installed Playtest 5 launched under an isolated profile, captured scripted cockpit and planet views,
+  then logged a clean capture completion and server save/shutdown. These images show washed-out ceiling
+  lights and high-frequency material noise. The capture shortcut does not verify the real opening journey.
+- Exact playable baseline and first candidate both built with Unity 6000.4.9f1. The first candidate had
+  zero C# or shader build diagnostics; its frozen payload and source fingerprint are retained locally.
+- First candidate's five actual High captures are 1920×1080. The unchanged baseline screenshot harness
+  produced 1920×1008; its separate performance run was verified at 1920×1080.
+- Same-machine High performance (Intel Core Ultra 5 225U / Intel ARL, OpenGLCore): baseline idle average
+  68.05 ms / p95 88.69 ms; first candidate idle 65.23 ms / p95 84.37 ms. Candidate forward-input phase
+  averaged 67.57 ms and included a 2847.7 ms stall. This is roughly 15 FPS, **not a performance pass**.
+  These old phases do not prove terrain traversal; the next probe has displacement telemetry.
+- Initial Unity EditMode tests: 29/34 passed, five equipment tests failed. Focused atlas PlayMode failed
+  before its material assertions because of a nonexistent floor key. The corrected second candidate
+  subsequently built and passed all 55 EditMode cases and the atlas PlayMode case. Six water-reflection
+  shader warnings require the next build to verify the explicit-LOD correction. Its capture attempt
+  stalled before the first image and was stopped as incomplete; a flag-only background execution override
+  and focus telemetry are being validated before new visual/performance claims.
+- Corrected source: 74 selected server cases and 202 Client.Tests passed, zero skipped. Full CI-filter
+  clean rebuild: zero warnings/errors; full format verification: zero changes in 667 files. Earlier
+  interrupted full-suite attempts are not passes. Raw logs/TRX/fingerprints are in local ignored artifacts.
+- Third player: zero build diagnostics, 55+1 Unity cases passed, seven actual 1080p captures. Same High
+  spawn idle averaged 59.86 ms (p95 65.92); input phase stayed aboard and moved only 1.12 m. Terrain
+  preparation failed and exited 2. No settled-workload or traversal pass; all sampled frames were focused.
+- Fourth .NET checkpoint: corrected clean CI build zero warnings/errors; 74 architecture cases and all
+  205 Client.Tests passed, zero skipped. Full restored format verification: zero changes in 670 files.
+  Fourth Unity player passed 60 EditMode and one atlas PlayMode case; six 1080p captures completed.
+  First journey attempt timed out during the first-run intro, before the world started. Fifth source
+  extends startup diagnostics, fixes terrain bevel holes and glowvine emission, and rejects performance
+  samples that overlap prologue camera motion. Fifth clean build and all 70 Unity cases passed; the real
+  journey entered the world and walked 5.75 m, then stopped at a probable harness step-down error. Save
+  inspection confirmed server movement; no complete journey/reload pass. Normal startup has a separate
+  Linux VSync/frame-pacing issue under investigation. Sixth source passes a clean warning-free CI build,
+  95 selected server cases, 205 Client.Tests and full format verification (0 of 674 files changed). Sixth
+  player compiled cleanly; four new EditMode failures exposed an authored-opacity defect and incomplete
+  test fixture setup. Corrections passed focused regressions. Seventh player is clean and all 86 Unity
+  cases pass, zero skips. Its real journey, new captures and valid performance samples are pending.
+- A new derivative concept sheet was generated with built-in ChatGPT only; its prompt and provenance
+  are retained with the earlier references. A specific image model version was not exposed by the tool.
+- [Validation record](docs/developer/CONCEPT_VALIDATION_2026-09-14.md) distinguishes candidates and evidence.
+
+**Required work still open — first ten-minute sequence is a checkpoint, not the whole request**
+
+- [ ] Complete and test scan → follow → excavate → shape/build → world signal response → new ability →
+  homecoming, including server authority, forged input rejection, reload and multiplayer behavior.
+- [ ] Match the defining large forms: basalt terrain/landmark, detailed useful ship home and monumental
+  excavated anchor. Current material changes alone do not satisfy the concepts.
+- [ ] Finish the visible tool/hand/door/cockpit/module improvements and verify footprints/collision.
+- [ ] Connect discoveries to persistent physical specimens and map changes aboard the ship.
+- [ ] Make expedition warnings give a readable choice to continue, build shelter or return; reinforce
+  planet-specific landscape, atmosphere, material, sound and risk.
+- [ ] Exercise useful construction scenarios (bridge, power, shelter, shaped signal solution), preserving
+  editable world truth and more than one valid route where appropriate.
+- [ ] Verify action sound, impacts, particles, device controls and comfort toggles in runtime.
+- [ ] Run affected .NET and Unity suites, clean warning/error checks and format verification; fix failures.
+- [ ] Review actual 1080p candidate views against all three concepts; iterate on defining mismatches.
+- [ ] Measure the same candidate/preset on the named hardware: p95 ≤16.67 ms, p99 <20 ms, report stalls
+  >50 ms, memory and representative traversal/building/ship/ruin costs. No performance pass yet.
+- [ ] Demonstrate the actual new-player journey and restart/continuation, separately from scripted setup.
+- [ ] Preserve a verified checkpoint, update player documentation and prepare an unmerged pull request.
+  Produce any distributable playtest through the project's cloud workflow with accurate opening steps.
 
 ---
 

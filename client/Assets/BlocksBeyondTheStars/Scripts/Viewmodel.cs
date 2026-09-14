@@ -23,6 +23,8 @@ namespace BlocksBeyondTheStars.Client
         private bool _visible = true;
 
         private float _swingTimer;
+        private float _drillContactUntil;
+        private float _drillEngagement;
         private float _bobPhase;
         private Vector3 _lastPos;
         private bool _hasPrev;
@@ -46,6 +48,9 @@ namespace BlocksBeyondTheStars.Client
         {
             EnsureHolder();
             _kind = kind;
+            _swingTimer = 0f;
+            _drillContactUntil = 0f;
+            _drillEngagement = 0f;
 
             for (int i = _holder.childCount - 1; i >= 0; i--)
             {
@@ -57,6 +62,8 @@ namespace BlocksBeyondTheStars.Client
             {
                 mesh.transform.localScale = Vector3.one * 0.9f;
             }
+
+            HeldItem.BuildGripHand(_holder, kind, Game?.Settings?.ArmColor ?? new Color(0.63f, 0.65f, 0.63f));
 
             ApplyVisible();
         }
@@ -129,6 +136,14 @@ namespace BlocksBeyondTheStars.Client
 
         public void Swing()
         {
+            if (_kind == HeldItem.Kind.Drill)
+            {
+                // The controller renews this only while its voxel target is valid. A held drill keeps
+                // contact, rather than repeatedly chopping away from the surface like a pickaxe.
+                _drillContactUntil = Time.time + 0.10f;
+                return;
+            }
+
             if (_swingTimer <= 0f)
             {
                 _swingTimer = SwingDuration;
@@ -172,6 +187,14 @@ namespace BlocksBeyondTheStars.Client
             var rot = RestEuler;
             var posOff = RestPos + bob;
 
+            if (_kind == HeldItem.Kind.Drill)
+            {
+                _drillEngagement = Mathf.MoveTowards(_drillEngagement, Time.time < _drillContactUntil ? 1f : 0f, dt * 9f);
+                posOff += new Vector3(-0.025f, -0.008f, 0.05f) * _drillEngagement;
+                posOff += new Vector3(0f, Mathf.Sin(Time.time * 110f) * 0.0012f, Mathf.Sin(Time.time * 87f) * 0.0008f) * _drillEngagement;
+                rot += new Vector3(-2f, 0f, 0f) * _drillEngagement;
+            }
+
             // Attack pose — shaped by the held item (B14): blades slash in an arc, guns kick back, the rest jab.
             if (_swingTimer > 0f)
             {
@@ -200,8 +223,9 @@ namespace BlocksBeyondTheStars.Client
                 }
             }
 
-            _holder.localPosition = posOff;
-            _holder.localEulerAngles = rot;
+            bool motion = !UiKit.ReducedMotion && (Game?.Settings == null || (Game.Settings.CameraMotion && !Game.Settings.ReducedEffects));
+            _holder.localPosition = motion ? posOff : RestPos;
+            _holder.localEulerAngles = motion ? rot : RestEuler;
         }
     }
 }

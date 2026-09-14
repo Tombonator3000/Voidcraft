@@ -26,6 +26,10 @@ namespace BlocksBeyondTheStars.Client
 
         private Process _process;
 
+        /// <summary>Read-only verification diagnostic for the most recently stopped local server.
+        /// Null until a launched server stops; false includes timeout/kill and nonzero exit.</summary>
+        public static bool? LastStopWasGraceful { get; private set; }
+
         public string Host { get; } = "127.0.0.1";
         public int Port { get; private set; } = DefaultPort;
         public bool IsRunning => _process != null && !_process.HasExited;
@@ -139,6 +143,7 @@ namespace BlocksBeyondTheStars.Client
                 return true;
             }
 
+            LastStopWasGraceful = null;
             Port = port;
             if (string.IsNullOrWhiteSpace(worldName))
             {
@@ -292,6 +297,8 @@ namespace BlocksBeyondTheStars.Client
                 return;
             }
 
+            bool forced = false;
+            LastStopWasGraceful = false;
             try
             {
                 if (!_process.HasExited)
@@ -305,10 +312,12 @@ namespace BlocksBeyondTheStars.Client
                     // Give the drain + save a moment; Kill() only as a last resort if it wedges.
                     if (!_process.WaitForExit(5000) && !_process.HasExited)
                     {
+                        forced = true;
                         _process.Kill();
                         _process.WaitForExit(2000);
                     }
                 }
+                LastStopWasGraceful = !forced && _process.HasExited && _process.ExitCode == 0;
             }
             catch
             {

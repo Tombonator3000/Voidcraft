@@ -875,6 +875,9 @@ public sealed class PlayerStateUpdate
     public float SuitEnergy { get; set; }
     public float Hunger { get; set; }
 
+    /// <summary>Personal survey history. The ship-owned specimen is replicated separately on LandedShipState.</summary>
+    public bool VeylSurveyComplete { get; set; }
+
     /// <summary>Whether the player is currently inside their ship (enables cargo crafting, oxygen regen).</summary>
     public bool AboardShip { get; set; }
 
@@ -1367,6 +1370,15 @@ public sealed class LandedShipState
     public int Height { get; set; }
     public int Length { get; set; }
 
+    /// <summary>A survey specimen owned by this specific vessel, visible to every observer.</summary>
+    public bool HasVeylSpecimen { get; set; }
+
+    /// <summary>Workshop dock in structure-local coordinates; valid only with HasVeylSpecimen.</summary>
+    public float SpecimenX { get; set; }
+    public float SpecimenY { get; set; }
+    public float SpecimenZ { get; set; }
+    public int SpecimenYaw { get; set; }
+
     /// <summary>Per-cell block coordinates (structure-local) and the block id placed there. Same length.
     /// Empty when <see cref="Removed"/>.</summary>
     public int[] X { get; set; } = System.Array.Empty<int>();
@@ -1729,6 +1741,8 @@ public sealed class NetShipStation
     public float X { get; set; }
     public float Y { get; set; }
     public float Z { get; set; }
+    /// <summary>Station fixture yaw in degrees; omitted values retain the legacy -Z-facing model.</summary>
+    public int Yaw { get; set; }
 }
 
 /// <summary>The interactive stations inside the ship, sent on join.</summary>
@@ -1951,6 +1965,21 @@ public sealed class WorldEnvironment
     /// ground_fog / drizzle / gale / blizzard / heatwave / acid_rain / ion_storm / meteor_shower /
     /// ember_fall / spore_bloom.</summary>
     public string Weather { get; set; } = "clear";
+
+    /// <summary>Current authoritative, player-specific expedition advice. Empty hides the advice card;
+    /// optional contractless field so older peers retain their existing weather display.</summary>
+    public string WeatherAdviceKey { get; set; } = string.Empty;
+
+    /// <summary>Localized protection reason: open, roof, ship, station, rules, immune, inactive or space.
+    /// Only the server's existing weather-exposure query chooses it.</summary>
+    public string WeatherProtectionKey { get; set; } = string.Empty;
+
+    /// <summary>0 information, 1 protect the suit, 2 low suit / seek cover. Presentation only.</summary>
+    public byte WeatherAdviceUrgency { get; set; }
+
+    /// <summary>Global weather multiplier on the terrain-scanner gadget radius, including under a roof.
+    /// This does not describe the hand scanner, and is not restored by local shelter.</summary>
+    public float TerrainScanWeatherFactor { get; set; } = 1f;
 
     /// <summary>0..1 weather strength. Since #900 a continuous envelope (attack → plateau → decay) around a
     /// per-episode peak, not a constant per state — so no two storms come out equally strong.</summary>

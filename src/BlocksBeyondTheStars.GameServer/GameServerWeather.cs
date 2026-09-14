@@ -484,6 +484,9 @@ public sealed partial class GameServer
     private void SendEnvironment(PlayerSession session)
     {
         var env = BuildEnvironment(session.State.Position);
+        var advice = ReadWeatherAdvice(session);
+        ApplyWeatherAdvice(env, advice);
+        session.LastWeatherAdviceSignature = advice.Signature(session.CurrentLocationId);
         // In vacuum (EVA spacewalk / on foot above the atmosphere) the air reading is meaningless — show
         // the sun-dependent hull temperature instead (#668): scorching on the day side, brutal in shadow.
         if (session.State.InEva || session.State.AboveAtmosphere)

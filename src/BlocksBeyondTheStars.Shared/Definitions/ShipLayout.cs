@@ -20,6 +20,12 @@ public sealed class ShipLayout
     public int Height { get; set; }
     public int Length { get; set; }
 
+    /// <summary>The author supplied the floor accents and roof lights; skip automatic room dressing.</summary>
+    public bool PreserveAuthoredFinishes { get; set; }
+
+    /// <summary>Optional clear standing cell for medical/initial spawn, rather than the station pedestal.</summary>
+    public ShipLayoutSpawn? Spawn { get; set; }
+
     public List<ShipLayoutCell> Cells { get; set; } = new();
 }
 
@@ -45,4 +51,15 @@ public sealed class ShipLayoutCell
 
     /// <summary>Packed shape + orientation (<c>ShapeCode.Pack(shape, facing)</c>; 0 = plain cube).</summary>
     public int Shape { get; set; }
+
+    /// <summary>Station presentation yaw in degrees, clockwise around +Y. Zero faces local -Z.</summary>
+    public int Yaw { get; set; }
+}
+
+/// <summary>An authored structure-local standing cell; the floor is one cell below it.</summary>
+public sealed class ShipLayoutSpawn
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Z { get; set; }
 }

@@ -65,6 +65,7 @@ public sealed partial class GameServer
         foreach (var session in JoinedInActiveWorld())
         {
             ApplyWeatherToPlayer(session, dt);
+            TickWeatherAdvice(session, dt);
         }
 
         _worlds.Active.SinceWeatherDeposit += dt;
@@ -80,57 +81,18 @@ public sealed partial class GameServer
     private void ApplyWeatherToPlayer(PlayerSession session, double dt)
     {
         var p = session.State;
-        if (p.InEva || p.AboardShip || p.GodMode || p.Health <= 0f || InStation(p.PlayerId))
+        var exposure = ReadWeatherExposure(session);
+        if (exposure.IonCharge > 0 && p.SuitEnergy < 100f)
         {
-            return;
+            p.SuitEnergy = Math.Min(100f, p.SuitEnergy + (float)(dt * exposure.IonCharge));
         }
-
-        var (state, intensity) = BiomeWeatherAt(p.Position);
-        if (intensity <= 0.01f)
+        else if (p.SuitEnergy > 0 && exposure.SuitDrain > 0)
         {
-            return;
+            p.SuitEnergy = Math.Max(0f, p.SuitEnergy - (float)(dt * exposure.SuitDrain));
         }
-
-        bool sheltered = RoofedAt(p.Position);
-        if (state == "ion_storm")
+        else if (p.SuitEnergy <= 0 && exposure.HealthDrain > 0)
         {
-            // The one weather you WANT to be caught in: an exposed suit soaks up the charge.
-            if (!sheltered && p.SuitEnergy < 100f)
-            {
-                p.SuitEnergy = Math.Min(100f, p.SuitEnergy + (float)(dt * IonChargePerSecond * intensity));
-            }
-
-            return;
-        }
-
-        if (!Rules.TemperatureHazardsEnabled || sheltered)
-        {
-            return;
-        }
-
-        // Acid eats through a suit, embers scorch it, meteorite grit shreds it. All three are survivable
-        // and readable: the suit buffer goes first, health only once it's gone.
-        float bite = state switch
-        {
-            "acid_rain" => 1.0f,
-            "ember_fall" => 0.75f,
-            "meteor_shower" => 0.6f,
-            _ => 0f,
-        };
-
-        if (bite <= 0f)
-        {
-            return;
-        }
-
-        float scale = bite * intensity * Rules.HazardSeverityFactor;
-        if (p.SuitEnergy > 0f)
-        {
-            p.SuitEnergy = Math.Max(0f, p.SuitEnergy - (float)(dt * WeatherSuitDrainPerSecond * scale));
-        }
-        else
-        {
-            p.Health = Math.Max(0f, p.Health - (float)(dt * WeatherDamagePerSecond * scale));
+            p.Health = Math.Max(0f, p.Health - (float)(dt * exposure.HealthDrain));
         }
     }
 

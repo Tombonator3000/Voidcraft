@@ -70,12 +70,12 @@ namespace BlocksBeyondTheStars.Client
             // rather than ??= so a menu/world transition can reacquire components that Unity has destroyed.
             if (_game == null)
             {
-                _game = FindFirstObjectByType<GameBootstrap>();
+                _game = FindAnyObjectByType<GameBootstrap>();
             }
 
             if (_space == null)
             {
-                _space = FindFirstObjectByType<SpaceView>();
+                _space = FindAnyObjectByType<SpaceView>();
             }
 
             var env = _game?.Environment;

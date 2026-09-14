@@ -53,7 +53,7 @@ namespace BlocksBeyondTheStars.Client
         private ScreenSpaceLensFlare _lensFlare;
         private float _speed; // 0..1 camera-motion intensity driver for the motion blur (set via SetMotion)
 
-        private const float BaseVignette = 0.26f;
+        private const float BaseVignette = 0.16f;
         private float _damagePulse;   // decaying 0..1 → a red-tinted vignette kick on damage
         private float _oxygenAlarm;   // 0..1 low-O₂ alarm level (driven by HudUi each frame)
         private float _burstTimer, _burstDuration, _burstChroma, _burstGrain;
@@ -90,9 +90,9 @@ namespace BlocksBeyondTheStars.Client
             }
             else
             {
-                bloom.threshold.Override(0.9f);
-                bloom.intensity.Override(0.5f);
-                bloom.scatter.Override(0.6f);
+                bloom.threshold.Override(1.15f);
+                bloom.intensity.Override(0.24f);
+                bloom.scatter.Override(0.45f);
             }
 
             _vignette = profile.Add<Vignette>(true);

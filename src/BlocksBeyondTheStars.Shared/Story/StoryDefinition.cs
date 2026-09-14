@@ -196,6 +196,10 @@ public sealed class StoryDefinition
     /// <summary>Mission threads (P7): turning in a matching random mission also yields a story fragment.</summary>
     public List<MissionThread> MissionThreads { get; set; } = new();
 
+    /// <summary>Optional physical survey expedition. Empty reward disables its monument and progression.
+    /// The reward uses the ordinary item/blueprint definitions, including its real gadget action.</summary>
+    public string SurveyRewardItemKey { get; set; } = string.Empty;
+
     // The finale and the two one-shot gameplay insights predate pluggable story packs. Keeping their text
     // keys on the pack prevents a second storyline from silently speaking VEGA Protocol copy at its climax.
 
