@@ -13,7 +13,7 @@ the complete reservation through JSON save/reload, and protects existing content
 It also corrects periodic wrapped-chunk eviction, navigation detours, aimed station hints, equipment
 readability and versioned vault lighting. These corrections are pushed; all four PR CI shards and their
 required test fan-in pass. Cloud run [34887583373](https://github.com/Tombonator3000/Voidcraft/actions/runs/34887583373)
-has passed validation and is building Windows/Linux packages; no completed package is claimed yet.
+has completed successfully: validation and both Windows/Linux packages passed.
 
 The corrected eighth clean CI build has zero warnings/errors. All 135 distinct selected server cases
 (including all five previously failing seeds) and 205 Client.Tests pass, with zero skips. The first
@@ -375,7 +375,7 @@ capture-only pose retry is awaiting ninth-player verification.
 
 On September 14 the user requested: stop development, merge the work completed so far and retain a plan
 for another session. The merge candidate is PR #10 at the verified implementation commit `fe81a9c`,
-targeting `feat/voidcraft-playable`. The unfinished ninth candidate is preserved separately on
+merged into `feat/voidcraft-playable` as `292e406f72766e4f513ab54b0adcf9f33070332c`. The unfinished ninth candidate is preserved separately on
 `wip/concept-upgrade-continuation-2026-09-14`; it is not part of that merge. All local agents and heavy
 jobs were stopped. No automatic continuation or new release has been scheduled.
 
@@ -386,8 +386,8 @@ jobs were stopped. No automatic continuation or new release has been scheduled.
 - Use Unity 6000.4.9f1 / URP 17.4 and .NET SDK 10.0.401. Keep the existing engine and atomic,
   server-authoritative world/save architecture. Use private test profiles; never installed player saves.
 - The eighth player has 135 selected server, 205 client and 100 Unity cases passing, a clean full Linux
-  build and green four-shard PR CI. Cloud run 34887583373 uses the exact implementation commit; at the
-  stop checkpoint its validation and Windows package passed while Linux packaging was running.
+  build and green four-shard PR CI. Cloud run 34887583373 uses the exact implementation commit and has completed successfully, including
+  validation and both Windows/Linux packages. Downloadable artifacts are on that workflow run.
 - Ninth code includes bounded basalt clusters/reservations, transient Veyl response networking/rendering,
   five navigation fixtures, safer capture poses and optional render-scale/thread diagnostics.
 - Ninth initial clean .NET build: zero warnings/errors. Initial targeted suite: 79/82 passing.

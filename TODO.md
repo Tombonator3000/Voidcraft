@@ -27,7 +27,7 @@ envelope at the WebSocket edge; deterministic seed world-gen; SQLite default per
 ## Concept implementation — 2026-09-14 (paused by user)
 
 The user stopped further development and authorized merging the verified checkpoint on September 14.
-PR #10 contains tested implementation through `fe81a9c`; the unfinished ninth candidate is preserved
+PR #10 merged tested implementation through `fe81a9c` into `feat/voidcraft-playable` as `292e406f`; the unfinished ninth candidate is preserved
 separately on `wip/concept-upgrade-continuation-2026-09-14` and must not be described as verified or merged.
 The ordered restart plan is in
 [Concept validation — continuation plan](docs/developer/CONCEPT_VALIDATION_2026-09-14.md#continuation-plan-after-the-user-requested-stop).
@@ -130,8 +130,8 @@ Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md
   48.888 ms average / 52.946 ms p95 still misses 60 FPS. The complete same-player SSAO/POM sweep is valid:
   SSAO-off saves 11.25–11.83% frame time, POM-off only 0.40–1.04%; ordinary defaults remain unchanged.
   Nine settled 1080p captures show improvements but the forward cabin view is missing. Full journey
-  and visual acceptance remain open. All four PR CI shards pass; cloud validation and the Windows
-  package pass, while the Linux package was still building at the stop checkpoint.
+  and visual acceptance remain open. All four PR CI shards pass; cloud validation and both Windows/Linux
+  packages completed successfully in run 34887583373.
 - The unfinished ninth snapshot adds local basalt clusters, the server-triggered spatial signal pulse,
   navigation/capture corrections and diagnostic render-scale/thread timing controls. Its clean .NET
   build passes; initial targeted tests are 79/82, with three failures. The ocean placement fixture
@@ -161,8 +161,8 @@ Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md
   [draft PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10) (2026-09-14).
 - [x] Push verified correction checkpoint `fe81a9c`, including placement, seam streaming and 100 passing
   Unity cases. The PR remains a draft while runtime and distribution gates are open.
-- [ ] Produce the distributable playtest through the project's cloud workflow with accurate opening
-  steps. [Run 34882893539](https://github.com/Tombonator3000/Voidcraft/actions/runs/34882893539) was
+- [x] Produce the distributable playtest through the project's cloud workflow with the existing playtest
+  guide. Corrected run 34887583373 passed validation and both Windows/Linux builds (2026-09-14). [Run 34882893539](https://github.com/Tombonator3000/Voidcraft/actions/runs/34882893539) was
   dispatched for `ad1a681`; validation failed on five placement cases (1830/1835 server cases passed),
   so Windows/Linux packaging was skipped. Corrected `fe81a9c` is being validated in
   [run 34887583373](https://github.com/Tombonator3000/Voidcraft/actions/runs/34887583373).
