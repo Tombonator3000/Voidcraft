@@ -59,6 +59,7 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
             float4 _Sc_LampColor;
             float  _Sc_Indoor;
             float4 _Sc_FloraTint;
+            float  _Sc_FloraGlowScale;
             float  _LeafCutoff;
 
             struct Attributes
@@ -152,7 +153,9 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     // tint resolver carry black there and keep the planet's uniform global hue.
                     float3 tint = dot(i.leaf.yzw, float3(1, 1, 1)) > 0.01 ? i.leaf.yzw : _Sc_FloraTint.rgb;
                     float lum = dot(albedo, float3(0.299, 0.587, 0.114));
-                    albedo = lerp(albedo, lum * tint * 1.6, 0.85);
+                    // Flora is a selective accent in the art direction, not a second emissive signal. Keep the
+                    // seeded species hue, but pull its value back so Veyl cyan and functional lights own the frame.
+                    albedo = lerp(albedo, lum * tint * 1.15, 0.72);
                 }
 
                 float3 light = (_Sc_Light.a < 0.5) ? float3(1, 1, 1) : _Sc_Light.rgb;
@@ -248,7 +251,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     float veins = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin((lw.x + lw.y) * 0.55 + lt * 1.1) + slab * 0.3);
                     lavaGlow = clamp(1.0 + 0.7 * slab + 0.9 * veins, 0.2, 2.2);
                 }
-                col += albedo * i.mat.a * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
+                float floraEmissionScale = (i.skyl.y > 0.5 && i.skyl.y < 1.5) ? _Sc_FloraGlowScale : 1.0;
+                col += albedo * i.mat.a * floraEmissionScale * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
 
                 // Placed coloured lights (flood-filled per-vertex, TEXCOORD3): illuminate this surface in
                 // their colour, regardless of sun/skylight, so lamps light caves + night builds. The baked
@@ -376,6 +380,7 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
             fixed4 _Sc_LampColor; // headlamp: rgb colour*intensity, a = enabled
             float _Sc_Indoor;     // ship-interior fill (0..1): lights skylight-occluded cabin faces
             fixed4 _Sc_FloraTint; // planet flora base hue (rgb); flora faces are desaturated + re-tinted to it
+            float _Sc_FloraGlowScale;
             float _LeafCutoff;    // alpha-test threshold for cutout foliage (leaf tiles carry a baked alpha mask)
 
             struct appdata
@@ -460,7 +465,9 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                 {
                     float3 tint = dot(i.leaf.yzw, float3(1, 1, 1)) > 0.01 ? i.leaf.yzw : _Sc_FloraTint.rgb;
                     float lum = dot(albedo, float3(0.299, 0.587, 0.114));
-                    albedo = lerp(albedo, lum * tint * 1.6, 0.85);
+                    // Flora is a selective accent in the art direction, not a second emissive signal. Keep the
+                    // seeded species hue, but pull its value back so Veyl cyan and functional lights own the frame.
+                    albedo = lerp(albedo, lum * tint * 1.15, 0.72);
                 }
 
                 fixed3 light = (_Sc_Light.a < 0.5) ? fixed3(1, 1, 1) : _Sc_Light.rgb;
@@ -568,7 +575,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     float veins = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin((lw.x + lw.y) * 0.55 + lt * 1.1) + slab * 0.3);
                     lavaGlow = clamp(1.0 + 0.7 * slab + 0.9 * veins, 0.2, 2.2);
                 }
-                col += albedo * i.mat.a * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
+                float floraEmissionScale = (i.skyl.y > 0.5 && i.skyl.y < 1.5) ? _Sc_FloraGlowScale : 1.0;
+                col += albedo * i.mat.a * floraEmissionScale * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
 
                 // Placed coloured lights (flood-filled per-vertex, TEXCOORD3): illuminate this surface in
                 // their colour, regardless of sun/skylight, so lamps light caves + night builds. The baked

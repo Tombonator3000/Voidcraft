@@ -1,25 +1,29 @@
 # Concept upgrade validation — September 14, 2026
 
-This is an in-progress implementation record, not release approval or a claim of concept fidelity.
+This implementation is paused at the user's request, not a claim of completion or concept fidelity.
 The full scope remains in [TODO.md](../../TODO.md). All launches use isolated profiles so installed saves
 are not used or migrated. Local validation players are not official distribution builds.
 
 ## Current checkpoint
 
-The published draft is commit `ad1a681` in [PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10).
-Its cloud playtest failed five fresh-world Veyl placement cases; packaging was skipped. The eighth local
+The published draft is commit `fe81a9c` in [PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10).
+The earlier `ad1a681` cloud playtest failed five fresh-world Veyl placement cases; packaging was skipped. The eighth
 candidate corrects those cases with supported basalt seating and an open half-step approach, preserves
 the complete reservation through JSON save/reload, and protects existing content and player edits.
 It also corrects periodic wrapped-chunk eviction, navigation detours, aimed station hints, equipment
-readability and versioned vault lighting. These corrections have not yet been pushed or distributed.
+readability and versioned vault lighting. These corrections are pushed; all four PR CI shards and their
+required test fan-in pass. Cloud run [34887583373](https://github.com/Tombonator3000/Voidcraft/actions/runs/34887583373)
+has completed successfully: validation and both Windows/Linux packages passed.
 
 The corrected eighth clean CI build has zero warnings/errors. All 135 distinct selected server cases
 (including all five previously failing seeds) and 205 Client.Tests pass, with zero skips. The first
 eighth build's compile failure and its exact source snapshot are retained separately. Full restored
 format verification passes with zero changes across 677 files after three whitespace-only corrections.
 The full Linux player builds without C# or shader diagnostics. All 100 Unity cases pass (91 EditMode,
-one atlas and eight terrain-seam PlayMode), zero skipped. The real-input journey, settled captures and
-performance measurements remain pending. Generator and save tests do not establish physical controller
+one atlas and eight terrain-seam PlayMode), zero skipped. Its real-input journey failed at hatch navigation;
+the first stationary performance sample passes workload validity but misses the frame-time target.
+Nine settled visual captures are available; the forward cabin view and complete journey remain pending.
+Generator and save tests do not establish physical controller
 access or visual quality. The frozen eighth build source manifest is
 `8fbaa342ca9f34b90f10056b2869db33a9fcf3454ece9da6c530b6455a7e5172`, over commit `ad1a681`.
 
@@ -315,6 +319,47 @@ The complete Unity run passes 91 EditMode, one atlas and eight terrain-seam Play
 skips or compiler/shader diagnostics. Final verification confirms all 25 source paths and all 263
 player payload files still match their saved hashes, with no extra payload files.
 
+Journey attempt 04 exited 1 at `LeaveHull / navigation_observed_geometry_unreachable` after 3.33 m of
+walking inside the ship. Input isolation, ordinary startup and graceful shutdown passed; hatch exit,
+survey actions and reload did not. Saved geometry and collider reports identify two test-driver issues:
+the arrival check required a three-dimensional distance tighter than the driver's allowed landing-height
+difference, and a center floor ray misclassified a capsule overlapping both stair treads as blocked.
+A correction must retain real collision and observed-cell checks; no hull or controller change is justified
+by this attempt alone.
+
+The first eighth High/1080p/OpenGLCore idle sample passes workload validity: all 614 frames had a fixed
+body/camera/FOV, exclusive input, focus, no menu/pause/cinematic and zero pending terrain work. No mesh
+dispatches, uploads or collider assignments occurred over 30.017 seconds; 510 loaded chunks/objects
+remained constant. The earlier ten-second bursts are absent in this sample. Average frame time is
+48.888 ms (about 20.45 FPS), p95 52.946 ms, so the 60 FPS target still fails. This is not a pure seventh
+versus eighth FPS comparison: other source changes and focus differ. The subsequent forward phase moved
+4.12 m while aboard and does not establish terrain traversal.
+
+The complete same-player feature sweep passes workload checks in all four runs: 30-second samples,
+fixed pose/FOV, full focus and input ownership, 510 chunks, zero terrain work. The default samples bracket
+the isolated feature changes; their mean frame times differ by 0.65%, which is observed drift rather
+than a statistical confidence interval.
+
+| Eighth High / 1080p configuration | Mean ms | p95 ms |
+|---|---:|---:|
+| Full SSAO, POM on (A1) | 48.888 | 52.946 |
+| SSAO off, POM on (B1) | 43.105 | 46.708 |
+| Full SSAO, POM off (B2) | 48.378 | 52.016 |
+| Full SSAO, POM on (A2) | 48.570 | 52.498 |
+
+Removing SSAO saves 11.25–11.83% of frame time in this view, but still misses 60 FPS. Removing POM saves
+only 0.40–1.04%, close to the baseline drift; disabling it is not justified here. Ordinary defaults
+are unchanged. One stationary integrated-GPU view does not establish traversal or other-machine costs.
+
+The rocky seed 4242 capture completed nine of ten requested 1920×1080 views. Terrain, approach, aft
+cabin and vault passed their readiness and shutter checks with zero pending mesh/collider work or
+failures. They use scripted poses and controlled lighting, not ordinary journey input. The aft cabin
+has a clear aisle, warm ceiling apertures and legible manufactured fixture casings; the vault shows the
+Anchor contour, overhead runes, bridge break and warm side route. Terrain remains visually busy and the
+local basalt landscape is not present in this eighth player. These are partial concept improvements.
+The forward cabin pose did not report grounded and was correctly omitted (capture exit 2); a bounded
+capture-only pose retry is awaiting ninth-player verification.
+
 ## Remaining gates
 
 - Actual architecture, door/tool/glass/material/specimen review and complete real-input journey.
@@ -325,3 +370,71 @@ player payload files still match their saved hashes, with no extra payload files
 - Representative terrain traversal, building, cabin and excavated ruin performance. Current High fails.
 - Useful shelter/bridge/power scenarios and actionable weather choices remain in scope.
 - Successful cloud playtest artifacts and accurate opening steps; the checkpoint and draft PR exist.
+
+## Continuation plan after the user-requested stop
+
+On September 14 the user requested: stop development, merge the work completed so far and retain a plan
+for another session. The merge candidate is PR #10 at the verified implementation commit `fe81a9c`,
+merged into `feat/voidcraft-playable` as `292e406f72766e4f513ab54b0adcf9f33070332c`. The unfinished ninth candidate is preserved separately on
+`wip/concept-upgrade-continuation-2026-09-14`; it is not part of that merge. All local agents and heavy
+jobs were stopped. No automatic continuation or new release has been scheduled.
+
+### Preserved state
+
+- Canonical repository: `Tombonator3000/Voidcraft`; local checkout was
+  `/home/tombonator3000t/Documents/Codex/VOIDCRAFT`. Fetch the remote branch before resuming.
+- Use Unity 6000.4.9f1 / URP 17.4 and .NET SDK 10.0.401. Keep the existing engine and atomic,
+  server-authoritative world/save architecture. Use private test profiles; never installed player saves.
+- The eighth player has 135 selected server, 205 client and 100 Unity cases passing, a clean full Linux
+  build and green four-shard PR CI. Cloud run 34887583373 uses the exact implementation commit and has completed successfully, including
+  validation and both Windows/Linux packages. Downloadable artifacts are on that workflow run.
+- Ninth code includes bounded basalt clusters/reservations, transient Veyl response networking/rendering,
+  five navigation fixtures, safer capture poses and optional render-scale/thread diagnostics.
+- Ninth initial clean .NET build: zero warnings/errors. Initial targeted suite: 79/82 passing.
+  `VeylLandscapePlacementTests` incorrectly assumed ocean/71 must use `wellhead_v1`; the observed dry
+  fallback is `terrace_v1`. The saved test correction retains support/access assertions and adds an
+  independent dry-entry check, but has not run. Two versions of
+  `VeylSignalResponseTests.PinnedWrappedSite_EmitsCanonicalSurvivingNodes_WithoutMigratingItsGeometry`
+  (0 and 4) fail in `PrepareRepair` at line 85 before response assertions; diagnosis is unfinished.
+- Exact failed source/logs are retained locally under
+  `artifacts/gauntlet-candidate/ninth/dotnet-attempt01-targetedfailure/`. These ignored artifacts are local
+  evidence, not files included in the remote branch. Ninth attempt05 scripts and the evidence-coverage
+  matrix are also under `artifacts/gauntlet-candidate/ninth/`; no attempt05 has launched.
+
+### Resume in this order
+
+1. Fetch the repository, inspect the preserved WIP branch against the merged checkpoint and fix the two
+   wrapped response failures. Distinguish fixture setup from a real server regression; retain old-save,
+   authority, exposed-host and world-wrap checks. Rerun the ocean fixture correction too.
+2. Validate the complete ninth candidate: clean .NET CI solution build, the prior 135 affected server
+   cases plus signal 11 / basalt helper 16 / landscape 8, all Client.Tests (207 expected), full format,
+   then fresh shared-library sync, full Linux player and all affected Unity suites. Expected Unity
+   count is 102 EditMode plus one atlas and eight terrain-seam cases; use actual runner counts.
+   Run only one local heavy job at a time. Preserve the source and player fingerprints.
+3. Run fresh ordinary seed-4242 acquisition followed by second-process reload with the existing real
+   controller/uGUI driver. The eighth failure was at the hatch after 3.33 m; the ninth center-first stair
+   clearance and shared arrival check are unverified. If it fails again, inspect the new geometry and
+   trajectory evidence before expanding the planner. Do not change player collision to satisfy a test.
+4. Inspect real 1080p terrain, basalt approach, forward/aft cabin and vault captures after every terrain
+   queue is quiet. Verify the missing forward cabin view, local column scale and access, Anchor/bridge
+   readability, equipment and physical specimens. Keep generated concepts separate from actual gameplay.
+5. Verify the new spatial pulse and positional sound from a legitimate repair, including a same-world
+   observer, reduced-effects behavior and no reload replay. Existing tests alone do not demonstrate two
+   live clients. The current journey result's `response` field only proves the permanent socket/glow/POI.
+6. Exercise ordinary bridge repair/crossing, useful shelter during actual hazardous weather and the
+   shaped signal connection. Verify advice/protection and saved edits. The signal connection supplies
+   the ruin's power scenario; do not invent a global base-power network to satisfy that wording.
+7. Resolve measured performance before adding decoration. First compare the same ninth player at
+   render scale 1.0 and 0.5 with identical fixed High/1080p pose and optional thread timings; restore
+   settings bytes afterward. This is a diagnostic, not a shipping-quality downgrade. A prepared
+   graphics Editor query can establish actual SRP-batcher compatibility before changing shader buffers.
+   Thread markers may contain GPU waits. Preserve POM until a measured benefit warrants removing it.
+   Then measure representative traversal, construction, cabin and vault; the current 60 FPS gate fails.
+8. Update TODO, this validation record and the user manual from observed results. Commit the next
+   verified increment, open a new PR against the then-current playable branch, and run the project's
+   cloud playtest workflow for that exact source. Do not auto-merge or release from this plan alone.
+
+The approved visual target remains a voxel world with detailed modular equipment/home architecture,
+large readable basalt forms and a monumental editable Veyl vault. Use only the built-in ChatGPT image
+generator for any new concepts. The user explicitly rejected Magnific/credit-service substitution;
+the internal tool does not expose an exact selectable “Images 2.5” version.

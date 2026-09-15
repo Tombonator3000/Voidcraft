@@ -1852,6 +1852,35 @@ namespace BlocksBeyondTheStars.Client
                         continue; // enclosed on three+ sides → inside the hull, not out on the surface
                     }
 
+                    // A dry foothold can still frame an entire lake when the ship is near a shoreline. Prefer a
+                    // direction with solid terrain ahead so the concept comparison measures the planet surface,
+                    // not an accidental water-only vista. This is capture placement only; no world or collision
+                    // data is changed, and an all-water horizon remains a valid reason to skip the view.
+                    Vector3 viewDirection = new Vector3(x - anchor.x, 0f, z - anchor.z).normalized;
+                    int waterAhead = 0;
+                    for (int sample = 1; sample <= 8; sample++)
+                    {
+                        Vector3 probe = new Vector3(x, stand.y + 1.1f, z)
+                            + viewDirection * (sample * 4f);
+                        bool waterColumn = false;
+                        for (float depth = 0f; depth <= 8f; depth += 1f)
+                        {
+                            if (BlockKeyAt(probe + Vector3.down * depth) == "water")
+                            {
+                                waterColumn = true;
+                                break;
+                            }
+                        }
+                        if (waterColumn)
+                        {
+                            waterAhead++;
+                        }
+                    }
+                    if (waterAhead > 0)
+                    {
+                        continue;
+                    }
+
                     SnapTo(stand);
                     // Face AWAY from the ship (from hull → player), so the camera looks out over the terrain and the
                     // ship falls behind the player, out of frame.

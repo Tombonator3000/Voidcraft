@@ -1532,6 +1532,7 @@
   "ui.settings.invert_y": "Vertikale Sicht invertieren",
   "ui.settings.camera_motion": "Kamerabewegung (Wippen/Wackeln)",
   "ui.settings.comfort": "Komfort & Wohlbefinden",
+  "ui.settings.reduced_effects": "Reduzierte Effekte",
   "ui.settings.auto_stow": "Beim Anbordgehen automatisch einlagern",
   "ui.settings.show_enemy_health": "Lebensbalken über Gegnern",
   "ui.settings.show_session_time": "Spielzeit anzeigen",

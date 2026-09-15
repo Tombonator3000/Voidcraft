@@ -360,10 +360,11 @@ public sealed partial class GameServer
         float bestSq = MonumentScanReach * MonumentScanReach;
         foreach (var m in _monuments)
         {
-            // Gap between the player and the monument's box (0 while inside it), longitude-wrap aware.
+            // Gap between the player and the monument's box (0 while inside it), wrap-aware on both axes.
             float relX = WorldConstants.WrapDeltaX((int)pos.X - m.Min.X, circ);
+            float relZ = (float)WorldConstants.WrapDeltaZ((double)pos.Z - m.Min.Z, circ);
             float dx = Gap(relX, 0, m.Max.X - m.Min.X);
-            float dz = Gap(pos.Z, m.Min.Z, m.Max.Z);
+            float dz = Gap(relZ, 0, m.Max.Z - m.Min.Z);
             float dy = Gap(pos.Y, m.Min.Y - 4, m.Max.Y + 4); // a relic is scannable from its foot and its top
             float d = (dx * dx) + (dy * dy) + (dz * dz);
             if (d < bestSq)

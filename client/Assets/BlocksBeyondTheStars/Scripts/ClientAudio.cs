@@ -499,7 +499,7 @@ namespace BlocksBeyondTheStars.Client
         /// Cave reverb + underwater muffle are baked into the clip via <see cref="SampleKit"/> instead of
         /// filter components — Unity Web silently ignores AudioReverbFilter/AudioLowPassFilter (#878), the
         /// baked variant sounds the same on every platform.</summary>
-        public void At(string id, Vector3 pos, float pitch = 1f, float vol = 1f, bool echo = false)
+        public void At(string id, Vector3 pos, float pitch = 1f, float vol = 1f, bool echo = false, Transform owner = null)
         {
             if (!_clips.TryGetValue(id, out var clip) || clip == null)
             {
@@ -511,13 +511,13 @@ namespace BlocksBeyondTheStars.Client
                 clip = SampleKit.CaveReverb(clip);
             }
 
-            AtClip(clip, pos, pitch, vol, id);
+            AtClip(clip, pos, pitch, vol, id, owner);
         }
 
         /// <summary>Plays an already-resolved clip positionally — the path generated creature voices take,
         /// since their variant is baked ahead of time rather than looked up by name (#903). The underwater
         /// muffle still applies here, so a baked voice ducks under water like every other one-shot.</summary>
-        public void AtClip(AudioClip clip, Vector3 pos, float pitch = 1f, float vol = 1f, string label = "voice")
+        public void AtClip(AudioClip clip, Vector3 pos, float pitch = 1f, float vol = 1f, string label = "voice", Transform owner = null)
         {
             if (clip == null)
             {
@@ -531,6 +531,8 @@ namespace BlocksBeyondTheStars.Client
 
             var go = new GameObject("sfx_" + label);
             go.transform.position = pos;
+            // Optional short-effect owner cancels the one-shot on world reset and carries seam relocation.
+            if (owner != null) go.transform.SetParent(owner, true);
             var src = go.AddComponent<AudioSource>();
             src.clip = clip;
             src.spatialBlend = 1f;

@@ -5,6 +5,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using UnityEngine;
 using Unity.Profiling;
@@ -30,7 +32,8 @@ namespace BlocksBeyondTheStars.Client
     /// <c>-perfOut &lt;dir&gt;</c>, <c>-seed &lt;n&gt;</c>, <c>-perfIdle &lt;sec&gt;</c>, <c>-perfWalk &lt;sec&gt;</c>,
     /// <c>-perfPreset &lt;name&gt;</c>, <c>-perfVd &lt;n&gt;</c>, and <c>-perfFeature "ssao=off|half|full,depth=off,
     /// smaa=off,scatter=off,pom=on|off,shadowmap=2048,shadowdist=40"</c> (isolate one preset feature's cost — see #374).
-    /// The numbers are a coarse CPU/GC baseline (wall-clock frame times), not a GPU profile — for the deep
+    /// <c>-perfRenderScale 0.1..1</c> isolates pixel cost; <c>-perfThreadTimings</c> records available thread markers.
+    /// The numbers are a coarse frame/GC baseline (wall-clock frame times), not a GPU profile — for the deep
     /// dive attach the Unity Profiler to a development build. When the preset is GPU-bound (the Medium cliff
     /// in #374), the wall-clock frame time still moves with each feature toggle, so a <c>-perfFeature</c>
     /// sweep at fixed preset/VD gives a usable first-order cost split without a GPU capture.
@@ -46,6 +49,7 @@ namespace BlocksBeyondTheStars.Client
         private const float FixedCameraPositionTolerance = 0.02f;
         private const float FixedCameraAngleTolerance = 0.1f;
         private const float FixedCameraFovTolerance = 0.1f;
+        private const int RenderScaleWarmupFrames = 3;
         private const float HitchMs33 = 1000f / 30f;   // frame longer than a 30 FPS frame
         private const float HitchMs100 = 100f;         // a visible stall
 
@@ -60,6 +64,15 @@ namespace BlocksBeyondTheStars.Client
         // is applied, force individual cost-bearing features off (or to a value) so a run isolates ONE feature's
         // frame-time contribution. This is how the Medium-preset cost split (#374) gets itemized: hold the preset
         // at Medium and toggle one feature per run. Null/empty = no per-feature override.
+        private string _renderScaleSpec;
+        private float _renderScaleRequested = -1f, _renderScaleOriginal = -1f;
+        private float _renderScaleApplied = -1f, _renderScaleRestoredValue = -1f;
+        private bool _renderScaleWasApplied, _renderScaleActive, _renderScaleRestored;
+        private UniversalRenderPipelineAsset _renderScalePipeline;
+        private string _renderScaleApplyError, _renderScaleRestoreError;
+        private bool _threadTimingsRequested;
+        private ProfilerRecorder _mainThreadTime, _renderThreadTime;
+        private string _mainThreadStatus = "not_requested", _renderThreadStatus = "not_requested";
         private string _featureSpec;
         private string _pomRequested;
         private bool _pomApplied;
@@ -96,6 +109,10 @@ namespace BlocksBeyondTheStars.Client
             _drawCalls.Dispose();
             _setPassCalls.Dispose();
             _vertices.Dispose();
+            _mainThreadTime.Dispose();
+            _renderThreadTime.Dispose();
+            RestoreRenderScale();
+            RestoreSettingsFile();
             ReleaseInput();
         }
 
@@ -123,7 +140,9 @@ namespace BlocksBeyondTheStars.Client
         // Settings.Save(), so an in-memory override could otherwise clobber the user's persisted settings.
         private byte[] _settingsBackup;
         private bool _settingsExisted;
-        private bool _didBackup; // restore only when a backup was actually taken (i.e. an override ran)
+        private bool _didBackup; // no settings mutation is allowed without a successful snapshot
+        private bool _settingsBytesPreserved;
+        private string _settingsOriginalSha256, _settingsRestoredSha256, _settingsRestoreError;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoInstall()
@@ -135,7 +154,8 @@ namespace BlocksBeyondTheStars.Client
             float idle = 30f, walk = 60f;
             string preset = null;
             int vd = -1;
-            string feature = null;
+            string feature = null, renderScale = null;
+            bool threadTimings = false;
             bool dense = false;
             bool terrain = false;
             for (int i = 0; i < args.Length; i++)
@@ -173,6 +193,14 @@ namespace BlocksBeyondTheStars.Client
                 {
                     feature = args[i + 1];
                 }
+                else if (string.Equals(a, "-perfRenderScale", StringComparison.OrdinalIgnoreCase))
+                {
+                    renderScale = i + 1 < args.Length ? args[i + 1] : "";
+                }
+                else if (string.Equals(a, "-perfThreadTimings", StringComparison.OrdinalIgnoreCase))
+                {
+                    threadTimings = true;
+                }
                 else if (string.Equals(a, "-perfTerrain", StringComparison.OrdinalIgnoreCase))
                 {
                     terrain = true;
@@ -201,6 +229,8 @@ namespace BlocksBeyondTheStars.Client
             p._presetOverride = preset;
             p._vdOverride = vd;
             p._featureSpec = feature;
+            p._renderScaleSpec = renderScale;
+            p._threadTimingsRequested = threadTimings;
             p._dense = dense;
             p._terrain = terrain;
         }
@@ -218,6 +248,11 @@ namespace BlocksBeyondTheStars.Client
                 yield break;
             }
             _input.Publish(default);
+            if (_threadTimingsRequested)
+            {
+                _mainThreadTime = StartThreadRecorder("Main Thread", out _mainThreadStatus);
+                _renderThreadTime = StartThreadRecorder("Render Thread", out _renderThreadStatus);
+            }
             var shell = FindAnyObjectByType<AppShell>();
             if (shell == null)
             {
@@ -228,12 +263,17 @@ namespace BlocksBeyondTheStars.Client
 
             yield return WaitForPhase(shell, ShellPhase.MainMenu, 30f);
 
-            // Optional settings overrides for comparable runs. Snapshot the real settings file first and
-            // restore it on exit — AppShell may persist settings mid-run, and the probe must never change
-            // what the player actually configured.
+            // Starting a world can also persist settings. Every explicit probe snapshots bytes, even
+            // when only render scale or thread diagnostics were requested, and verifies restoration.
+            BackupSettingsFile();
+            if (!_didBackup)
+            {
+                Debug.LogError("[PerfProbe] Settings snapshot failed; no world or override started.");
+                Quit(7);
+                yield break;
+            }
             if (!string.IsNullOrEmpty(_presetOverride) || _vdOverride > 0)
             {
-                BackupSettingsFile();
                 if (!string.IsNullOrEmpty(_presetOverride)
                     && Enum.TryParse<QualityPreset>(_presetOverride, ignoreCase: true, out var qp))
                 {
@@ -293,6 +333,17 @@ namespace BlocksBeyondTheStars.Client
                 Quit(6);
                 yield break;
             }
+
+            if (!ApplyRenderScaleOverride())
+            {
+                _measurementFailure = "requested_render_scale_not_applied";
+                WriteResults(shell, phases);
+                Quit(6);
+                yield break;
+            }
+
+            if (_renderScaleSpec != null)
+                for (int frame = 0; frame < RenderScaleWarmupFrames; frame++) yield return null;
 
             // Phase 1: idle — steady-state cost with the spawn area fully streamed.
             PhaseResult r = null;
@@ -357,9 +408,12 @@ namespace BlocksBeyondTheStars.Client
             }
 
             if (_terrain && !phases[1].traversalVerified) _measurementFailure = "terrain_traversal_unverified";
+            bool sampledRenderScaleVerified = SampledRenderScaleVerified(phases);
             WriteResults(shell, phases);
             RestoreSettingsFile();
-            Quit(_terrain && !phases[1].traversalVerified ? 2 : 0);
+            int exitCode = !sampledRenderScaleVerified ? 6
+                : _terrain && !phases[1].traversalVerified ? 2 : 0;
+            Quit(exitCode);
         }
 
         private static string SettingsPath => Path.Combine(Application.persistentDataPath, "client_settings.json");
@@ -370,6 +424,7 @@ namespace BlocksBeyondTheStars.Client
             {
                 _settingsExisted = File.Exists(SettingsPath);
                 _settingsBackup = _settingsExisted ? File.ReadAllBytes(SettingsPath) : null;
+                _settingsOriginalSha256 = _settingsExisted ? HashBytes(_settingsBackup) : null;
                 _didBackup = true;
             }
             catch (Exception ex)
@@ -382,7 +437,7 @@ namespace BlocksBeyondTheStars.Client
         {
             if (!_didBackup)
             {
-                return; // no override ran — never touch the player's settings file
+                return; // no snapshot exists — never touch the player's settings file
             }
 
             try
@@ -395,18 +450,109 @@ namespace BlocksBeyondTheStars.Client
                 {
                     File.Delete(SettingsPath); // fresh install: leave no trace of the override
                 }
+                bool exists = File.Exists(SettingsPath);
+                _settingsRestoredSha256 = exists ? HashBytes(File.ReadAllBytes(SettingsPath)) : null;
+                _settingsBytesPreserved = exists == _settingsExisted
+                    && (!_settingsExisted || _settingsRestoredSha256 == _settingsOriginalSha256);
+                _settingsRestoreError = _settingsBytesPreserved ? null : "settings_bytes_differ_after_restore";
             }
             catch (Exception ex)
             {
+                _settingsBytesPreserved = false;
+                _settingsRestoreError = ex.GetType().Name;
                 Debug.LogWarning($"[PerfProbe] Could not restore settings: {ex.Message}");
             }
         }
 
         private void OnApplicationQuit()
         {
+            RestoreRenderScale();
             ReleaseInput();
             RestoreSettingsFile(); // also runs if the process is interrupted
         }
+
+        private static string HashBytes(byte[] bytes)
+        {
+            using (var sha = SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        }
+
+        private static float CurrentRenderScale()
+            => GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp ? urp.renderScale : 1f;
+
+        private bool ApplyRenderScaleOverride()
+        {
+            if (_renderScaleSpec == null) return true;
+            bool explicitProbe = Application.isEditor || Array.Exists(Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-perfProbe", StringComparison.OrdinalIgnoreCase));
+            if (!explicitProbe || !InputMap.OwnsVerificationInput(_input)
+                || !float.TryParse(_renderScaleSpec, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+                || float.IsNaN(value) || float.IsInfinity(value) || value < 0.1f || value > 1f
+                || !(GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp))
+                return false;
+            _renderScaleRequested = value;
+            _renderScalePipeline = urp;
+            _renderScaleOriginal = urp.renderScale;
+            _renderScaleActive = true; // own restoration even if the setter unexpectedly clamps the value
+            try
+            {
+                urp.renderScale = value;
+                _renderScaleApplied = urp.renderScale;
+                _renderScaleWasApplied = Mathf.Abs(_renderScaleApplied - value) < 0.0001f;
+            }
+            catch (Exception ex)
+            {
+                _renderScaleApplyError = ex.GetType().Name;
+                RestoreRenderScale();
+                return false;
+            }
+            Debug.Log($"[PerfProbe] Render scale requested {value}, actual {_renderScaleApplied}, original {_renderScaleOriginal}.");
+            return _renderScaleWasApplied;
+        }
+
+        private void RestoreRenderScale()
+        {
+            if (!_renderScaleActive) return;
+            try
+            {
+                if (_renderScalePipeline == null)
+                {
+                    _renderScaleRestoreError = "pipeline_unavailable_during_restore";
+                    return;
+                }
+                _renderScalePipeline.renderScale = _renderScaleOriginal;
+                _renderScaleRestoredValue = _renderScalePipeline.renderScale;
+                _renderScaleRestored = Mathf.Abs(_renderScaleRestoredValue - _renderScaleOriginal) < 0.0001f;
+                _renderScaleRestoreError = _renderScaleRestored ? null : "render_scale_differs_after_restore";
+                if (_renderScaleRestored) _renderScaleActive = false;
+            }
+            catch (Exception ex) { _renderScaleRestoreError = ex.GetType().Name; }
+        }
+
+        private static ProfilerRecorder StartThreadRecorder(string marker, out string status)
+        {
+            ProfilerRecorder recorder = default;
+            try
+            {
+                recorder = ProfilerRecorder.StartNew(ProfilerCategory.Internal, marker, 1);
+                if (!recorder.Valid)
+                    status = "marker_unavailable_in_this_player";
+                else if (recorder.UnitType != ProfilerMarkerDataUnit.TimeNanoseconds)
+                    status = "unsupported_unit_" + recorder.UnitType;
+                else
+                {
+                    status = "marker_registered; sample_availability_recorded_per_phase";
+                    return recorder;
+                }
+            }
+            catch (Exception ex) { status = "unavailable_" + ex.GetType().Name; }
+            recorder.Dispose();
+            return default;
+        }
+
+        private static float ReadThreadMilliseconds(ProfilerRecorder recorder)
+            => recorder.Valid && recorder.Count > 0 && recorder.UnitType == ProfilerMarkerDataUnit.TimeNanoseconds
+                ? recorder.LastValue * 0.000001f : -1f;
 
         /// <summary>Applies the <c>-perfFeature</c> overrides on top of the active preset, mutating the same
         /// runtime knobs <see cref="ClientSettings.Apply"/> owns (URP asset + the gameplay camera's URP data +
@@ -655,6 +801,11 @@ namespace BlocksBeyondTheStars.Client
             public long managedMemEndBytes;
             public long unityAllocatedEndBytes;
             public float[] frameTimesMs;
+            public float[] mainThreadTimesMs, renderThreadTimesMs, renderScales;
+            public int mainThreadSamplesAvailable, renderThreadSamplesAvailable, framesRenderScaleMatching;
+            public float mainThreadAvgMs = -1f, renderThreadAvgMs = -1f;
+            public float renderScaleStart, renderScaleEnd;
+            public bool renderScaleVerified;
             public Vector3 positionStart;
             public Vector3 positionEnd;
             public float horizontalDisplacementMeters;
@@ -703,6 +854,15 @@ namespace BlocksBeyondTheStars.Client
             public int vSyncCount;
             public int targetFrameRate;
             public float renderScale;
+            public string renderScaleOverrideRequested;
+            public bool renderScaleOverrideApplied, renderScaleRestorationVerified;
+            public float renderScaleRequested, renderScaleOriginal, renderScaleApplied, renderScaleRestored;
+            public string renderScaleApplyError, renderScaleRestoreError;
+            public int renderScaleWarmupFrames;
+            public bool settingsSnapshotTaken, settingsFileOriginallyExisted, settingsBytesPreserved;
+            public string settingsOriginalSha256, settingsRestoredSha256, settingsRestoreError;
+            public bool threadTimingsRequested;
+            public string mainThreadRecorderStatus, renderThreadRecorderStatus, threadTimingCaveat;
             public bool runInBackground;
             public string inputPolicy;
             public bool terrainProbeRequested;
@@ -723,6 +883,13 @@ namespace BlocksBeyondTheStars.Client
         {
             Debug.Log($"[PerfProbe] Phase '{name}' — sampling {seconds:0}s...");
             var samples = new List<float>(Mathf.CeilToInt(seconds) * 300); // generous: fits 300 FPS without regrowth
+            var mainTimes = new List<float>();
+            var renderTimes = new List<float>();
+            var renderScales = new List<float>();
+            int mainAvailable = 0, renderAvailable = 0, scaleMatching = 0;
+            float mainSum = 0f, renderSum = 0f;
+            float scaleStart = CurrentRenderScale();
+            float expectedScale = _renderScaleSpec != null ? _renderScaleRequested : scaleStart;
             int gc0 = GC.CollectionCount(0), gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
             long mem = GC.GetTotalMemory(false);
 
@@ -756,6 +923,18 @@ namespace BlocksBeyondTheStars.Client
             {
                 float dt = Time.unscaledDeltaTime;
                 samples.Add(dt * 1000f);
+                float scale = CurrentRenderScale();
+                renderScales.Add(scale);
+                if (Mathf.Abs(scale - expectedScale) < 0.0001f) scaleMatching++;
+                if (_threadTimingsRequested)
+                {
+                    float mainMs = ReadThreadMilliseconds(_mainThreadTime);
+                    float renderMs = ReadThreadMilliseconds(_renderThreadTime);
+                    mainTimes.Add(mainMs);
+                    renderTimes.Add(renderMs);
+                    if (mainMs >= 0f) { mainAvailable++; mainSum += mainMs; }
+                    if (renderMs >= 0f) { renderAvailable++; renderSum += renderMs; }
+                }
                 Vector3 position = _boot.PlayerPosition;
                 travelled += WrappedDifference(position, previous).magnitude;
                 previous = position;
@@ -810,6 +989,19 @@ namespace BlocksBeyondTheStars.Client
                 managedMemEndBytes = GC.GetTotalMemory(false),
                 unityAllocatedEndBytes = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong(),
                 frameTimesMs = samples.ToArray(),
+                mainThreadTimesMs = mainTimes.ToArray(),
+                renderThreadTimesMs = renderTimes.ToArray(),
+                mainThreadSamplesAvailable = mainAvailable,
+                renderThreadSamplesAvailable = renderAvailable,
+                mainThreadAvgMs = mainAvailable > 0 ? mainSum / mainAvailable : -1f,
+                renderThreadAvgMs = renderAvailable > 0 ? renderSum / renderAvailable : -1f,
+                renderScales = renderScales.ToArray(),
+                renderScaleStart = scaleStart,
+                renderScaleEnd = CurrentRenderScale(),
+                framesRenderScaleMatching = scaleMatching,
+                renderScaleVerified = samples.Count > 0 && scaleMatching == samples.Count
+                    && Mathf.Abs(scaleStart - expectedScale) < 0.0001f
+                    && Mathf.Abs(CurrentRenderScale() - expectedScale) < 0.0001f,
                 positionStart = start,
                 positionEnd = _boot.PlayerPosition,
                 horizontalDisplacementMeters = new Vector2(WrappedDifference(_boot.PlayerPosition, start).x,
@@ -855,7 +1047,7 @@ namespace BlocksBeyondTheStars.Client
             };
 
             r.fixedIdleVerified = name == "idle" && r.frames > 0 && cameraAvailable
-                && exclusiveInputFrames == r.frames
+                && exclusiveInputFrames == r.frames && r.renderScaleVerified
                 && cinematicFrames == 0 && prologueFrames == 0 && menuFrames == 0 && pausedFrames == 0
                 && workStart.total == 0 && r.chunkWorkEnd.total == 0 && workPeak.total == 0 && workPeak.meshFailures == 0
                 && cameraDistance <= FixedCameraPositionTolerance && cameraAngle <= FixedCameraAngleTolerance
@@ -893,8 +1085,23 @@ namespace BlocksBeyondTheStars.Client
             return sorted[i];
         }
 
+        private bool SampledRenderScaleVerified(List<PhaseResult> phases)
+            => _renderScaleSpec == null || phases.TrueForAll(phase => phase.renderScaleVerified);
+
         private void WriteResults(AppShell shell, List<PhaseResult> phases)
         {
+            float measuredScale = CurrentRenderScale();
+            bool sampledRenderScaleVerified = SampledRenderScaleVerified(phases);
+            if (!sampledRenderScaleVerified)
+                _measurementFailure = "requested_render_scale_changed_during_sampling";
+            // No sampling follows result writing. Verify restoration before serializing its outcome;
+            // teardown repeats restoration defensively. External runners can verify the file hash after exit.
+            RestoreRenderScale();
+            RestoreSettingsFile();
+            if (_renderScaleSpec != null && (!_renderScaleWasApplied || !_renderScaleRestored))
+                _measurementFailure = _measurementFailure ?? "render_scale_apply_or_restore_unverified";
+            if (_didBackup && !_settingsBytesPreserved)
+                _measurementFailure = _measurementFailure ?? "settings_restoration_unverified";
             var result = new ProbeResult
             {
                 capturedUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
@@ -910,7 +1117,27 @@ namespace BlocksBeyondTheStars.Client
                 height = Screen.height,
                 vSyncCount = QualitySettings.vSyncCount,
                 targetFrameRate = Application.targetFrameRate,
-                renderScale = GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp ? urp.renderScale : 1f,
+                renderScale = measuredScale,
+                renderScaleOverrideRequested = _renderScaleSpec,
+                renderScaleOverrideApplied = _renderScaleWasApplied,
+                renderScaleRequested = _renderScaleRequested,
+                renderScaleOriginal = _renderScaleOriginal,
+                renderScaleApplied = _renderScaleApplied,
+                renderScaleRestored = _renderScaleRestoredValue,
+                renderScaleRestorationVerified = _renderScaleRestored,
+                renderScaleApplyError = _renderScaleApplyError,
+                renderScaleRestoreError = _renderScaleRestoreError,
+                renderScaleWarmupFrames = _renderScaleWasApplied ? RenderScaleWarmupFrames : 0,
+                settingsSnapshotTaken = _didBackup,
+                settingsFileOriginallyExisted = _settingsExisted,
+                settingsBytesPreserved = _settingsBytesPreserved,
+                settingsOriginalSha256 = _settingsOriginalSha256,
+                settingsRestoredSha256 = _settingsRestoredSha256,
+                settingsRestoreError = _settingsRestoreError,
+                threadTimingsRequested = _threadTimingsRequested,
+                mainThreadRecorderStatus = _mainThreadStatus,
+                renderThreadRecorderStatus = _renderThreadStatus,
+                threadTimingCaveat = "Thread markers may include GPU/present waits; these are not pure CPU-work measurements. Missing samples are -1ms, not zero.",
                 runInBackground = Application.runInBackground,
                 inputPolicy = "exclusive_perf_source; native InputMap backends and legacy ScriptedMove excluded",
                 featureRequested = _featureSpec,
@@ -923,6 +1150,9 @@ namespace BlocksBeyondTheStars.Client
                 phases = phases.ToArray(),
                 readiness = _readiness.ToArray(),
                 measurementValid = phases.Count > 0 && phases[0].fixedIdleVerified && _readiness.TrueForAll(x => x.passed)
+                    && (_renderScaleSpec == null || _renderScaleWasApplied && _renderScaleRestored)
+                    && sampledRenderScaleVerified
+                    && (!_didBackup || _settingsBytesPreserved)
                     && (!_terrain || phases.Count > 1 && phases[1].traversalVerified),
                 measurementFailure = _measurementFailure,
                 fixedCameraPositionToleranceMeters = FixedCameraPositionTolerance,
@@ -933,6 +1163,8 @@ namespace BlocksBeyondTheStars.Client
             string dir = !string.IsNullOrEmpty(_outDir) ? _outDir : Path.Combine(Application.persistentDataPath, "perf");
             Directory.CreateDirectory(dir);
             string featureSuffix = string.IsNullOrEmpty(_featureTag) ? "" : $"_{_featureTag}";
+            if (_renderScaleSpec != null)
+                featureSuffix += "_scale" + _renderScaleRequested.ToString("0.###", CultureInfo.InvariantCulture).Replace('.', '_');
             string denseSuffix = (_dense ? "_dense" : "") + (_terrain ? "_terrain" : "");
             string baseName = $"perf_baseline_{Application.platform}_{result.qualityPreset}_vd{result.viewDistanceChunks}{denseSuffix}{featureSuffix}";
             string jsonPath = Path.Combine(dir, baseName + ".json");
@@ -949,6 +1181,11 @@ namespace BlocksBeyondTheStars.Client
             txt.AppendLine($"{result.width}×{result.height}, {result.graphicsApi}, render scale {result.renderScale:0.00}, "
                          + $"vSync {result.vSyncCount}, target FPS {result.targetFrameRate}, background execution {result.runInBackground}");
             txt.AppendLine($"Measurement valid: {result.measurementValid}; failure: {result.measurementFailure ?? "none"}.");
+            txt.AppendLine($"Scale request {result.renderScaleOverrideRequested ?? "none"}, applied {result.renderScaleApplied}, "
+                + $"original {result.renderScaleOriginal}, restored {result.renderScaleRestored}, restoration verified {result.renderScaleRestorationVerified}.");
+            txt.AppendLine($"Settings bytes preserved before result write: {result.settingsBytesPreserved}; "
+                + $"snapshot taken {result.settingsSnapshotTaken}, restoration error {result.settingsRestoreError ?? "none"}.");
+            if (_threadTimingsRequested) txt.AppendLine(result.threadTimingCaveat);
             foreach (var ready in result.readiness)
                 txt.AppendLine($"Readiness [{ready.name}]: {ready.reason}, {ready.elapsedSeconds:0.0}s / "
                     + $"{ready.deadlineSeconds:0}s deadline, quiet {ready.finalQuietSeconds:0.0}s, end backlog {ready.end.total}.");
@@ -962,6 +1199,10 @@ namespace BlocksBeyondTheStars.Client
                     + $"terrain chunks {ph.terrainChunksVisited}, aboard frames {ph.framesAboard}, space frames {ph.framesInSpace}, "
                     + $"peak mesh backlog {ph.peakMeshBacklog}, traversal verified {ph.traversalVerified}");
                 txt.AppendLine($"  focused frames {ph.framesFocused}, unfocused frames {ph.framesUnfocused}");
+                txt.AppendLine($"  render scale start/end {ph.renderScaleStart}/{ph.renderScaleEnd}, matching frames {ph.framesRenderScaleMatching}, verified {ph.renderScaleVerified}");
+                if (_threadTimingsRequested)
+                    txt.AppendLine($"  thread markers main/render {ph.mainThreadAvgMs:0.000}/{ph.renderThreadAvgMs:0.000}ms, "
+                        + $"available samples {ph.mainThreadSamplesAvailable}/{ph.renderThreadSamplesAvailable}; -1 means unavailable");
                 txt.AppendLine($"  fixed idle verified {ph.fixedIdleVerified}; camera max offset {ph.maxCameraDistanceFromStart:0.000}m, "
                     + $"angle {ph.maxCameraAngleFromStart:0.000}°, FOV delta {ph.maxCameraFovDeltaFromStart:0.000}°; "
                     + $"cinematic/prologue/menu/paused frames {ph.framesCinematicCameraActive}/{ph.framesPrologueActive}/{ph.framesMenuOpen}/{ph.framesWorldPaused}");
@@ -996,6 +1237,10 @@ namespace BlocksBeyondTheStars.Client
 
         private void Quit(int code)
         {
+            RestoreRenderScale();
+            RestoreSettingsFile();
+            if (code == 0 && ((_renderScaleSpec != null && !_renderScaleRestored) || (_didBackup && !_settingsBytesPreserved)))
+                code = 7;
             ReleaseInput();
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;

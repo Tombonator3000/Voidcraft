@@ -214,6 +214,10 @@ $packArgs = @(
     # splash, then starts BlocksBeyondTheStars.exe. The launcher calls VelopackApp.Run() first, so install/
     # update/uninstall hooks are handled correctly.
     '--mainExe', 'BlocksBeyondTheStars.Launcher.exe',
+    # Keep the no-terminal first-run experience explicit: the installed launcher gets both a Desktop and
+    # Start-menu shortcut. This is Velopack's default, but pinning it here makes the release contract visible
+    # and protects it from a future CLI default change.
+    '--shortcuts', 'Desktop,StartMenuRoot',
     # Give Setup.exe / Update.exe the game icon too (the installed shortcut already inherits it from the
     # launcher's embedded <ApplicationIcon>; vpk does NOT derive the installer icon from mainExe).
     '--icon', $iconPath,

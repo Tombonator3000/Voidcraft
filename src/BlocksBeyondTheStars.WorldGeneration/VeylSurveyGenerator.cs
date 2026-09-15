@@ -28,13 +28,15 @@ public static class VeylSurveyGenerator
     };
 
     /// <summary>Only the open approach needs sky clearance. Clearing every vault column above the roof
-    /// would strip its natural overburden and reveal a rectangular box on the surface.</summary>
+    /// would strip its natural overburden and reveal a rectangular box on the surface. The extra three
+    /// cells on the open stair/landing are intentional: they cover the ordinary 1.8 m player capsule plus
+    /// the streamed terrain seam margin, so natural terrain cannot occupy the entrance head volume.</summary>
     public static int MinimumCarveHeight(int geometryVersion, int x, int z)
         => geometryVersion switch
         {
             0 or 1 => BurialDepth + 4,
-            2 or 3 or LatestVersion => (x >= 10 && x <= 14 && z <= 27) || (x >= 6 && x <= 16 && z <= 4)
-                ? VaultBurialDepth + 4 : z == 27 && x >= 3 && x <= 14 ? 8 : 0,
+            2 or 3 or LatestVersion => (x >= 9 && x <= 15 && z <= 27) || (x >= 6 && x <= 16 && z <= 4)
+                ? VaultBurialDepth + 7 : z == 27 && x >= 3 && x <= 14 ? 8 : 0,
             _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
         };
     public static readonly Vector3i SurfaceContact = new(11, 8, 10);
@@ -50,6 +52,34 @@ public static class VeylSurveyGenerator
             LatestVersion => GenerateVault(content, surfaceBlock, interruptedBridge: true, readableLighting: true),
             _ => throw new System.ArgumentOutOfRangeException(nameof(geometryVersion)),
         };
+
+    /// <summary>Bounded cosmetic pulse route through authored north-facing rune surfaces. This only
+    /// describes existing geometry: it never stamps blocks, changes saved versions, or invents an Anchor
+    /// in legacy sites. The server must filter removed, reshaped and covered hosts before sending it.</summary>
+    public static IEnumerable<Vector3i> SignalNodes(int geometryVersion)
+    {
+        if (geometryVersion is 0 or 1)
+        {
+            yield return BuriedContact;
+            yield return SurfaceContact;
+            yield break;
+        }
+        if (geometryVersion is not (2 or 3 or 4)) yield break;
+        yield return VaultBuriedContact;
+        // Pointed tips are intentionally excluded: a full-face decal would float off their pyramids.
+        for (int y = 12; y <= 21; y++)
+        {
+            int radius = y <= 12 || y >= 21 ? 0 : y <= 14 || y >= 19 ? 1 : 2;
+            yield return new Vector3i(12, y, 50 - radius);
+        }
+        // The closest complete frame receives the answer after the Anchor's spine.
+        for (int y = 7; y <= 19; y += 4)
+        {
+            yield return new Vector3i(6, y, 50);
+            yield return new Vector3i(18, y, 50);
+        }
+        yield return VaultSurfaceContact;
+    }
 
     private static SettlementStructure GenerateLegacy(GameContent content, string surfaceBlock)
     {
@@ -152,13 +182,16 @@ public static class VeylSurveyGenerator
         for (int z = 0; z <= 21; z++)
         {
             int step = VaultBurialDepth - z;
-            Box(10, 0, z, 14, step, z, shell);
-            Box(11, step + 1, z, 13, 30, z, 0);
-            for (int x = 11; x <= 13; x++)
-                shapes[Index(x, step, z)] = ShapeCode.Pack(BlockShape.Stairs, 2);
-            // Low side walls describe the trench without narrowing the three-meter walking volume.
-            Box(10, step + 1, z, 10, step + 1, z, shell);
-            Box(14, step + 1, z, 14, step + 1, z, shell);
+            Box(9, 0, z, 15, step, z, shell);
+            Box(10, step + 1, z, 14, 30, z, 0);
+            for (int x = 10; x <= 14; x++)
+                // Keep the stepped side lanes as the landmark's visual rhythm, while the three-cell
+                // centre lane is a continuous 45-degree ramp so an ordinary capsule can descend it
+                // without catching on a downward riser or a neighbouring stair edge.
+                shapes[Index(x, step, z)] = ShapeCode.Pack(x is >= 11 and <= 13 ? BlockShape.Ramp : BlockShape.Stairs, 2);
+            // Low side walls describe the trench without narrowing the five-meter walking volume.
+            Box(9, step + 1, z, 9, step + 1, z, shell);
+            Box(15, step + 1, z, 15, step + 1, z, shell);
         }
         Box(10, 0, 22, 14, 4, 27, shell);
         Box(8, 0, 3, 8, 27, 3, shell);
@@ -199,7 +232,10 @@ public static class VeylSurveyGenerator
             }
         }
 
-        Box(11, 4, 28, 13, 4, 46, shell);
+        // Keep a solid west shoulder beside the broken centre span. The return approach is still a
+        // visibly interrupted bridge on the rune-lit east edge, while the shoulder prevents a valid
+        // capsule-width breadcrumb from landing on the one-cell lip between the bridge and gallery.
+        Box(9, 4, 28, 13, 4, 46, shell);
         for (int z = 33; z <= 42; z += 3) Set(13, 4, z, 0);
         Box(9, 4, 46, 16, 4, 49, shell);
         if (interruptedBridge)

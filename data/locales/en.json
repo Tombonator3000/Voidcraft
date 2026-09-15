@@ -1532,6 +1532,7 @@
   "ui.settings.invert_y": "Invert vertical look",
   "ui.settings.camera_motion": "Camera motion (bob/shake)",
   "ui.settings.comfort": "Comfort & wellbeing",
+  "ui.settings.reduced_effects": "Reduced effects",
   "ui.settings.auto_stow": "Auto-stow into cargo on boarding",
   "ui.settings.show_enemy_health": "Enemy health bars",
   "ui.settings.show_session_time": "Show playtime",

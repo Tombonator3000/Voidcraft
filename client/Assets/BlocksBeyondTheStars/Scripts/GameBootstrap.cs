@@ -105,6 +105,10 @@ namespace BlocksBeyondTheStars.Client
             }
         }
         public NetworkClient Network { get; private set; }
+
+        /// <summary>Raised after baseline handlers are attached and before connect/poll can dispatch a
+        /// first packet. Views initialized by WorldRig can subscribe without depending on Update order.</summary>
+        public event System.Action<NetworkClient> NetworkInitialized;
         public ClientWorld World { get; private set; }
         public BlockTextureAtlas Atlas { get; private set; }
 
@@ -227,12 +231,35 @@ namespace BlocksBeyondTheStars.Client
                 var (r, g, b) = isWood
                     ? BlocksBeyondTheStars.Shared.World.FloraTints.ForWood(_worldSeed, LocationName)
                     : BlocksBeyondTheStars.Shared.World.FloraTints.For(_worldSeed, LocationName, def.Key);
+                Color authored = new Color(r, g, b);
+                authored = ArtDirectedFloraTint(def.Key, authored);
                 // The mesher writes these into TEXCOORD2 and the block shader multiplies them raw —
                 // convert the sRGB-authored hue at this boundary (no-op in Gamma space).
-                map[def.NumericId.Value] = ShaderColor.Srgb(new Color(r, g, b));
+                map[def.NumericId.Value] = ShaderColor.Srgb(authored);
             }
 
             _floraTintByBlock = map;
+        }
+
+        /// <summary>Preserves deterministic species variation while keeping rocky-family flora subordinate to
+        /// basalt silhouettes and Veyl's functional cyan. Lush biomes retain their authored saturated palette.</summary>
+        private Color ArtDirectedFloraTint(string blockKey, Color rolled)
+        {
+            bool basaltFamily = LoadingPlanetType is "rocky" or "varied" or "highland" or "skylands";
+            if (!basaltFamily)
+            {
+                return rolled;
+            }
+
+            // Rocky reference frames use two restrained accent families: cool graphite/cyan dust for
+            // crystalline species, and a low-saturation ember/rust for dry blooms. Do not let the fully
+            // random flora hue turn the basalt mesas neon green; Veyl cyan remains the functional signal.
+            Color anchor = blockKey is "flora_crystal" or "flora_shardbloom" or "flora_lichen"
+                ? new Color(0.16f, 0.25f, 0.26f)
+                : blockKey is "flora_emberbloom" or "flora_ashweed" or "flora_cinderbush"
+                    ? new Color(0.38f, 0.20f, 0.10f)
+                    : new Color(0.28f, 0.30f, 0.21f);
+            return Color.Lerp(anchor, rolled, 0.10f);
         }
 
         /// <summary>The mesher's tint lookup: a flora block's per-world colour, black (= "use the global
@@ -2034,6 +2061,8 @@ namespace BlocksBeyondTheStars.Client
                 }
             };
             Network.ServerMessageReceived += m => { Debug.Log(m.Text); LastMessage = ServerMessageText(m.Text); };
+
+            NetworkInitialized?.Invoke(Network);
 
             // Connect now; the join handshake is sent once the transport reports Connected
             // (UDP connect is asynchronous — sending the join before that would be dropped).

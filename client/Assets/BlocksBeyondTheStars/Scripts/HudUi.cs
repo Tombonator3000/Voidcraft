@@ -170,6 +170,22 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>Set while a HUD exists so world-side FX (MiningFx) can hand off pickup fly-ins.</summary>
         public static HudUi Instance { get; private set; }
         private Canvas _flyCanvas; // own overlay canvas so the visor distortion can't bend the fly-ins
+        private bool _captureSuppressed;
+
+        /// <summary>Temporarily show or hide the diegetic HUD for a documented visual capture. Normal gameplay
+        /// never calls this; the capture director restores the previous state immediately after the frame.</summary>
+        public bool SetCaptureVisible(bool visible)
+        {
+            _captureSuppressed = !visible;
+            EnsureBuilt();
+            bool previous = _canvas != null && _canvas.enabled;
+            if (_canvas != null)
+            {
+                _canvas.enabled = visible;
+            }
+
+            return previous;
+        }
 
         private void Awake() => Instance = this;
 
@@ -186,7 +202,7 @@ namespace BlocksBeyondTheStars.Client
             // Hidden while a menu is open — and during the prologue cinematic (#760): vitals/hotbar/
             // crosshair in the frame break the letterboxed shot. The VEGA speech panel and the
             // CinematicFrame chrome live on their own canvases, so the story text stays visible.
-            bool show = !Game.MenuOpen && !Game.VegaPrologueActive && !Game.CinematicCameraActive;
+            bool show = !_captureSuppressed && !Game.MenuOpen && !Game.VegaPrologueActive && !Game.CinematicCameraActive;
             if (_canvas.enabled != show)
             {
                 _canvas.enabled = show;

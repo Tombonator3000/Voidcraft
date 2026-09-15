@@ -376,14 +376,14 @@ namespace BlocksBeyondTheStars.Client
                     px[i] = Scale(px[i], 0.96f);
                 }
 
-                for (int c = 0; c < 3; c++)
+                for (int c = 0; c < 1; c++)
                 {
                     int x = rng.Next(Tile), y = rng.Next(Tile);
                     int steps = Tile / 2 + rng.Next(Tile / 2);
                     for (int s = 0; s < steps; s++)
                     {
                         px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)] =
-                            Scale(px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)], 0.70f);
+                            Scale(px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)], 0.82f);
                         x += rng.Next(3) - 1;
                         y += rng.Next(3) - 1;
                     }
@@ -397,13 +397,15 @@ namespace BlocksBeyondTheStars.Client
                     px[i] = Scale(px[i], 1.06f);
                 }
 
-                for (int s = 0; s < 30; s++)
+                for (int s = 0; s < 8; s++)
                 {
                     int x = rng.Next(Tile - 1), y = rng.Next(Tile - 1);
                     float k = rng.Next(2) == 0 ? 0.72f : 1.18f;
                     px[y * Tile + x] = Scale(px[y * Tile + x], k);
-                    px[y * Tile + x + 1] = Scale(px[y * Tile + x + 1], k);
-                    px[(y + 1) * Tile + x] = Scale(px[(y + 1) * Tile + x], k);
+                    if (rng.Next(3) == 0)
+                    {
+                        px[y * Tile + x + 1] = Scale(px[y * Tile + x + 1], k);
+                    }
                 }
             }
 
@@ -1134,9 +1136,11 @@ namespace BlocksBeyondTheStars.Client
 
         private static Color BaseColor(string key) => key switch
         {
-            "stone" => new Color(0.55f, 0.55f, 0.57f),
+            // Quiet graphite stone keeps large rocky mesas cool; the amber contrast comes from the star and
+            // authored signal/lamps rather than from every terrain face.
+            "stone" => new Color(0.46f, 0.47f, 0.52f),
             "dirt" => new Color(0.45f, 0.32f, 0.20f),
-            "basalt" => new Color(0.24f, 0.24f, 0.27f),
+            "basalt" => new Color(0.22f, 0.23f, 0.28f),
             "obsidian" => new Color(0.10f, 0.07f, 0.14f), // glassy black with a violet cast (#477)
             "ice" => new Color(0.70f, 0.85f, 0.95f),
             "iron_ore" => new Color(0.58f, 0.50f, 0.46f),

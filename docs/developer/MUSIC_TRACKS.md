@@ -1,5 +1,17 @@
 # Background music tracks (Suno library)
 
+## VOIDCRAFT signal track status
+
+The Veyl-signal context is wired in `ClientMusic` and takes priority while an uncompleted
+`veyl_signal` POI is present. Its preferred private delivery is `music_voidcraft_signal_treblo`;
+the current fallback is `music_mystery_signal` followed by the normal exploration bed.
+
+Treblo provenance: `UNAVAILABLE` in the 2026-09-15 implementation session. The requested private,
+loopable instrumental was not generated or imported, and no other generation service was used as a
+replacement. When the approved asset is delivered, place it at
+`client/Assets/Resources/music/music_voidcraft_signal_treblo.mp3` with its Unity meta file; the
+existing pool and crossfade logic will pick it up automatically.
+
 The granular background-music library used by the **Tracks** music mode (see
 `docs/SOUND_DESIGN.md` §11). 23 instrumental, calm, loop-friendly sci-fi tracks generated with
 [Suno](https://suno.com/) by the project owner, plus a **variance pack** of 12 `_2` B-sides (wired

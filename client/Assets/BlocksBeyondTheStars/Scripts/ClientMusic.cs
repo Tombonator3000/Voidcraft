@@ -34,7 +34,7 @@ namespace BlocksBeyondTheStars.Client
             Silent, Menu, Loading,
             ShipInterior, Station,
             PlanetGeneric, PlanetIce, PlanetDesert, PlanetLava, PlanetToxic, PlanetOcean,
-            PlanetVerdant, PlanetCrystal, PlanetCave,
+            PlanetVerdant, PlanetCrystal, PlanetCave, VeylSignal,
             Space, Combat,
             // Finale (P6): the staged Guardian-core confrontation. These override every other context and
             // always play their dedicated boss track (even in Synth mode / combat) — a scripted set-piece.
@@ -212,6 +212,15 @@ namespace BlocksBeyondTheStars.Client
             if (game.Aboard)
             {
                 return Context.ShipInterior;   // inside the ship (not flying) — the calm cabin bed
+            }
+
+            // An unresolved Veyl signal owns the musical foreground, including when the player is inside
+            // its excavated chamber. The server-sent POI is the authority; completion removes the context
+            // permanently and lets the normal cave/biome music resume.
+            if (!game.VeylSurveyComplete && game.PlanetPois != null
+                && System.Array.Exists(game.PlanetPois, p => p.Type == "veyl_signal"))
+            {
+                return Context.VeylSignal;
             }
 
             if (!game.ExposedToSky)
@@ -402,6 +411,10 @@ namespace BlocksBeyondTheStars.Client
                 Context.PlanetVerdant => new() { "music_planet_verdant", "music_planet_verdant_2", "music_explore_planet", "music_explore_planet_2" },
                 Context.PlanetCrystal => new() { "music_moon_crystal", "music_explore_planet", "music_explore_planet_2" },
                 Context.PlanetCave => new() { "music_planet_cave", "music_planet_cave_2" },
+                // The first Treblo delivery is intentionally optional. Its missing resource is filtered
+                // out here, leaving the bundled mystery signal as the deterministic fallback until the
+                // private track becomes available.
+                Context.VeylSignal => new() { "music_voidcraft_signal_treblo", "music_mystery_signal", "music_explore_planet" },
                 Context.PlanetGeneric => GenericPlanetPool(game),
                 _ => new List<string>(),
             };

@@ -52,6 +52,47 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         }
 
         [Test]
+        public void OutboundAndHomecomingJourneyWaitForEachAnimatedEnergyHatchOpening()
+        {
+            var hatch = new NetDoor { Id = 70, Kind = "energy", AxisX = true, Width = 2f, Open = false };
+            Receive(hatch);
+            var collider = _root.GetComponentInChildren<BoxCollider>();
+            Assert.IsTrue(collider.enabled);
+            Assert.IsFalse(JourneyPassageReady(hatch));
+
+            hatch.Open = true;
+            Receive(hatch);
+            Assert.IsTrue(collider.enabled, "The server-open packet arrives before the panels have cleared the capsule.");
+            Assert.IsFalse(JourneyPassageReady(hatch),
+                "The journey must not plan through the hatch while its real collider still blocks the route.");
+
+            for (int frame = 0; frame < 4; frame++) AdvanceDoors(1f / 60f);
+            Assert.IsTrue(collider.enabled, "At 40% open the two-metre hatch is still narrower than the capsule clearance.");
+            Assert.IsFalse(JourneyPassageReady(hatch));
+
+            AdvanceDoors(1f / 60f);
+            Assert.IsFalse(collider.enabled);
+            Assert.IsTrue(JourneyPassageReady(hatch),
+                "The outbound journey can proceed once the animated view has actually released its collider.");
+
+            hatch.Open = false;
+            Receive(hatch);
+            Assert.IsFalse(JourneyPassageReady(hatch),
+                "A closing server state cannot start home entry even while the local panels are still retracting.");
+            for (int frame = 0; frame < 5; frame++) AdvanceDoors(1f / 60f);
+            Assert.IsTrue(collider.enabled);
+
+            hatch.Open = true;
+            Receive(hatch);
+            Assert.IsFalse(JourneyPassageReady(hatch),
+                "Homecoming must wait through the same real collider transition as the outbound route.");
+            for (int frame = 0; frame < 5; frame++) AdvanceDoors(1f / 60f);
+            Assert.IsFalse(collider.enabled);
+            Assert.IsTrue(JourneyPassageReady(hatch),
+                "Home entry can proceed only after the reopened hatch has physically cleared the capsule.");
+        }
+
+        [Test]
         public void ReusedRegistryIdRebuildsPositionAxisAndReleasesOldResources()
         {
             Receive(new NetDoor { Id = 4, Kind = "energy", X = 2f, Y = 3f, Z = 4f, AxisX = true, Width = 1f });
@@ -90,6 +131,20 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             var method = typeof(DoorView).GetMethod("OnDoors", BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);
             method.Invoke(_view, new object[] { new DoorList { Doors = doors } });
+        }
+
+        private void AdvanceDoors(float deltaTime)
+        {
+            var method = typeof(DoorView).GetMethod("AdvanceDoors", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            method.Invoke(_view, new object[] { deltaTime });
+        }
+
+        private bool JourneyPassageReady(NetDoor door)
+        {
+            var method = typeof(SurveyJourneyProbe).GetMethod("DoorPassageReady", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            return (bool)method.Invoke(null, new object[] { door, _view });
         }
     }
 }

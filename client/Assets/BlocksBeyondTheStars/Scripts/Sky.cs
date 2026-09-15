@@ -35,6 +35,7 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int GradeParamsId = Shader.PropertyToID("_Sc_GradeParams");
         private static readonly int IndoorId = Shader.PropertyToID("_Sc_Indoor");
         private static readonly int FloraTintId = Shader.PropertyToID("_Sc_FloraTint");
+        private static readonly int FloraGlowScaleId = Shader.PropertyToID("_Sc_FloraGlowScale");
         // Explicit distance haze for the block shaders (Unity's MixFog doesn't engage on the unlit voxels):
         // x=start, y=end, z=max strength (already faded out indoors), w=on.
         private static readonly int FogId = Shader.PropertyToID("_Sc_Fog");
@@ -152,6 +153,7 @@ namespace BlocksBeyondTheStars.Client
                 Shader.SetGlobalColor(Shader.PropertyToID("_Sc_LampColor"), new Color(0f, 0f, 0f, 0f));
                 Shader.SetGlobalFloat(IndoorId, 0f);
                 Shader.SetGlobalColor(FloraTintId, new Color(0f, 0f, 0f, 0f)); // no planet flora tint in space
+                Shader.SetGlobalFloat(FloraGlowScaleId, 1f);
                 Shader.SetGlobalVector(FogId, new Vector4(0f, 1f, 0f, 0f)); // distance haze off in space
                 RenderSettings.fog = false;
                 if (_sunDisc != null)
@@ -203,6 +205,7 @@ namespace BlocksBeyondTheStars.Client
             // Per-world daytime sky/atmosphere hue (server-seeded; blue → green → yellow → red). Only worlds with an
             // atmosphere actually show it (airless bodies go to the space sky below). Fallback = the old fixed blue.
             Color skyBase = env != null ? Rgb(env.SkyColor) : new Color(0.55f, 0.75f, 0.95f);
+            skyBase = AtmosphereBase(Game.Environment?.Biome, skyBase);
             // Boarded on an orbital station: it floats free in space, so show the space sky (black, no fog)
             // and treat it like a lit, life-supported interior — independent of the planet far below.
             bool boarded = !string.IsNullOrEmpty(Game.StationName);
@@ -213,12 +216,21 @@ namespace BlocksBeyondTheStars.Client
             if (env != null && !boarded)
             {
                 Color flora = Rgb(env.FloraTint);
+                bool rockyFamily = Game.Environment?.Biome is "rocky" or "varied" or "highland" or "skylands";
+                if (rockyFamily)
+                {
+                    // Rocky reference frames reserve bright cyan for Veyl's functional signal. Keep any
+                    // fallback/global flora tint in a quiet graphite-olive band when a mesh has no species tint.
+                    flora = Color.Lerp(new Color(0.26f, 0.30f, 0.22f), flora, 0.06f);
+                }
                 flora.a = 1f;
                 Shader.SetGlobalColor(FloraTintId, ShaderColor.Srgb(flora));
+                Shader.SetGlobalFloat(FloraGlowScaleId, rockyFamily ? 0.18f : 1f);
             }
             else
             {
                 Shader.SetGlobalColor(FloraTintId, new Color(0f, 0f, 0f, 0f));
+                Shader.SetGlobalFloat(FloraGlowScaleId, 1f);
             }
 
             ApplyLighting(_time, intensity, sun, skyBase, spaceSky, constantLight: boarded);
@@ -370,6 +382,8 @@ namespace BlocksBeyondTheStars.Client
         {
             switch ((biome ?? string.Empty).ToLowerInvariant())
             {
+                case "rocky": case "varied": case "highland": case "skylands":
+                    return (new Color(1.03f, 0.96f, 0.90f), 0.90f, 1.08f);
                 case "jungle": case "forest": return (new Color(0.98f, 1.05f, 0.96f), 1.12f, 1.05f);
                 case "desert": return (new Color(1.07f, 1.00f, 0.90f), 0.95f, 1.12f);
                 case "ice": case "frozen": return (new Color(0.94f, 1.00f, 1.09f), 0.90f, 1.06f);
@@ -377,6 +391,23 @@ namespace BlocksBeyondTheStars.Client
                 case "swamp": return (new Color(0.97f, 1.03f, 0.95f), 0.85f, 1.03f);
                 case "crystal": return (new Color(1.04f, 0.97f, 1.09f), 1.10f, 1.05f);
                 default: return (new Color(1f, 1f, 1f), 1.00f, 1.03f);
+            }
+        }
+
+        /// <summary>Cool, deep atmospheric base for the basaltic planet family. The server still owns the
+        /// source sky colour and star hue; this controlled blend only prevents the default green/pale wash
+        /// from flattening rocky mesas into the same value as their ground.</summary>
+        private static Color AtmosphereBase(string biome, Color skyBase)
+        {
+            switch ((biome ?? string.Empty).ToLowerInvariant())
+            {
+                case "rocky": case "varied": case "highland": case "skylands":
+                    // The approved frontier frame is an indigo upper atmosphere with a warm amber horizon.
+                    // Keep the server-seeded sky identity, but bias the high field strongly enough that it
+                    // cannot collapse into the old pale green/brown wash on rocky mesas.
+                    return Color.Lerp(skyBase, new Color(0.18f, 0.24f, 0.48f), 0.72f);
+                default:
+                    return skyBase;
             }
         }
 

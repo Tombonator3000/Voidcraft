@@ -17,10 +17,11 @@ namespace BlocksBeyondTheStars.Client
         private readonly HashSet<Vector3Int> _mineCells = new();
         private Dictionary<string, int> _beforeExcavation;
         private Vector3Int _stairCell, _coreCell, _socketCell, _pendingMine;
-        private Vector3 _stairStart, _entryDirection;
+        private Vector3 _stairStart, _stairEntryFeet, _entryDirection;
         private bool _returning, _coreScan, _shapedPlacement, _response, _homecoming, _rewardAction, _reloadVerified;
         private bool _mineWaiting, _runeResponded;
-        private int _excavated, _returnIndex;
+        private int _excavated, _surfaceReturnIndex, _returnIndex, _returnSkipped;
+        private bool _returnEntryPending, _returnEntryCompleted;
         private double _nextMine, _stableSince;
         private string _materialItem, _acquireEvidencePath;
         private float _energyBeforeUse;
@@ -75,9 +76,12 @@ namespace BlocksBeyondTheStars.Client
         {
             if (!FindEntryStair(out _stairCell))
             { Finish("failed", "no_loaded_walkable_stair_near_observed_signal", 1); return; }
+            _surfaceReturnIndex = Math.Max(0, _breadcrumbs.Count - 1);
             _stairStart = _stairCell;
             if (!StandOn(_stairCell, out _goal))
             { Finish("failed", "observed_stair_has_no_body_clearance", 1); return; }
+            _stairEntryFeet = _goal;
+            Log("stair_entry", $"cell={_stairCell.x},{_stairCell.y},{_stairCell.z};feet={_goal.x:F2},{_goal.y:F2},{_goal.z:F2}");
             Enter(Step.StairApproach, 50);
         }
 
@@ -89,7 +93,7 @@ namespace BlocksBeyondTheStars.Client
                     if (WalkToward(_goal, 0.45f, ref input)) Enter(Step.StairDown, 120);
                     return;
                 case Step.StairDown:
-                    if (!WalkToward(_goal, 0.45f, ref input)) return;
+                    if (!WalkToward(_goal, 0.45f, ref input, allowDirectObservedFallback: true)) return;
                     if (FindLowerStair(_stairCell, out var next))
                     {
                         _stairCell = next;
@@ -182,23 +186,81 @@ namespace BlocksBeyondTheStars.Client
                 case Step.Response:
                     if (!_shapedPlacement || !_runeResponded || Poi("veyl_return") == null) return;
                     _response = true; Capture("shaped_socket_and_response");
-                    _returning = true; _returnIndex = _breadcrumbs.Count - 1;
+                    _returning = true; _returnEntryPending = false; _returnEntryCompleted = false;
+                    _returnIndex = _breadcrumbs.Count - 1;
                     Enter(Step.ReturnWalk, 300);
                     return;
                 case Step.ReturnWalk:
                     if (HorizontalDistance(_player.transform.position, DoorPosition()) < 2.8f
                         && Mathf.Abs(_player.transform.position.y - DoorPosition().y) < 2)
                     { _scanFrame = -1; Enter(Step.HomeDoorOpen, 15); return; }
+                    Vector3 returnPosition = _player.transform.position;
+                    if (!_returnEntryCompleted && !_returnEntryPending
+                        && HorizontalDistance(returnPosition, _stairEntryFeet) < 4f
+                        && Mathf.Abs(returnPosition.y - _stairEntryFeet.y) < 4f)
+                    {
+                        _returnEntryPending = true;
+                        _path.Clear(); _nextPlan = 0;
+                    }
+                    if (_returnEntryPending)
+                    {
+                        // Breadcrumbs begin on the surface side of the signal. Re-anchor the ordinary
+                        // controller at the observed stair mouth first; otherwise the first coarse
+                        // breadcrumb can ask for an impossible diagonal climb into the chunk boundary.
+                        if (WalkToward(_stairEntryFeet, 0.7f, ref input, allowObservedNavigationFailure: true,
+                            allowDirectObservedFallback: true))
+                        {
+                            _returnEntryPending = false;
+                            _returnEntryCompleted = true;
+                            _returnIndex = _surfaceReturnIndex;
+                            _path.Clear(); _nextPlan = 0;
+                        }
+                        return;
+                    }
                     while (_returnIndex >= 0 && Vector3.Distance(_player.transform.position, _breadcrumbs[_returnIndex]) < 1.1f) _returnIndex--;
                     if (_returnIndex < 0) { Finish("failed", "return_route_ended_before_owned_hatch", 1); return; }
-                    if (WalkToward(_breadcrumbs[_returnIndex], 0.6f, ref input)) { _returnIndex--; _path.Clear(); _nextPlan = 0; }
+                    int targetIndex = _returnIndex;
+                    if (WalkToward(_breadcrumbs[targetIndex], 0.6f, ref input, allowObservedNavigationFailure: true,
+                        allowDirectObservedFallback: true))
+                    { _returnIndex--; _path.Clear(); _nextPlan = 0; }
+                    else if (_navigationSearch == null && _path.Count == 0 && _navigationReport != null
+                        && _navigationReport.status != "searching"
+                        && _navigationReport.status != "direct_input_fallback"
+                        && targetIndex == _returnIndex)
+                    {
+                        // A return breadcrumb can land on the wrong half of a shaped step after the player
+                        // has already walked out of it. Let the next earlier, actually traversed breadcrumb
+                        // provide the observed detour, but never skip more than a small bounded pocket.
+                        if (_returnSkipped++ >= 8)
+                        { Finish("failed", "return_route_exhausted_observed_detours", 1); return; }
+                        Log("return_waypoint_skip", $"index={targetIndex};status={_navigationReport.status}");
+                        _returnIndex--;
+                        _navigationGoalSet = false;
+                        _navigationSearch = null;
+                        _navigationReport = null;
+                        _path.Clear();
+                        _nextPlan = 0;
+                    }
                     return;
                 case Step.HomeDoorOpen:
                     var latest = _doors.FirstOrDefault(d => d.Id == _door.Id);
                     if (latest != null) _door = latest;
                     Aim(DoorPosition() + Vector3.up, ref input);
-                    if (_door.Open) { _goal = _start; Enter(Step.HomeEnter, 50); }
-                    else if ((_door.Kind == "hinge" || _door.Kind == "wood") && _scanFrame < 0)
+                    if (DoorPassageReady(_door, DoorView.Instance)) { _goal = _start; Enter(Step.HomeEnter, 50); }
+                    else if (_door.Kind is "slide" or "energy")
+                    {
+                        // Slide/energy hatches are server-opened by proximity. Move to the measured
+                        // exterior threshold instead of waiting at the ReturnWalk hand-off edge; this
+                        // keeps the final door transition physical and lets the authoritative tick open it.
+                        _goal = DoorPosition() + _doorNormal * 0.8f;
+                        WalkToward(_goal, 0.45f, ref input);
+                        if (_scanFrame == -1)
+                        {
+                            Log("home_door_state", $"id={_door.Id};kind={_door.Kind};open={_door.Open};door={DoorPosition()};player={_player.transform.position}");
+                            _scanFrame = -2;
+                        }
+                    }
+                    else if (_scanFrame < 0)
                     { input.Press(InputAction.Interact); _scanFrame = Time.frameCount; }
                     return;
                 case Step.HomeEnter:
@@ -234,7 +296,15 @@ namespace BlocksBeyondTheStars.Client
                     { Finish("failed", "reload_did_not_restore_same_owned_home_and_specimen", 1); return; }
                     if (ItemCount("terrain_scanner") != _acquireEvidence.rewardCount)
                     { Finish("failed", "reload_reward_missing_or_duplicated", 1); return; }
-                    if (Vector3.Distance(_player.transform.position, _acquireEvidence.lastPosition) > 2)
+                    // Surface-world longitude and latitude wrap at the seam. A persisted home position
+                    // near zero can therefore be restored as circumference-epsilon in the next process;
+                    // compare the same physical point through the authoritative torus distance instead
+                    // of treating the canonical coordinate representation as a teleport.
+                    Vector3 restored = _player.transform.position, expected = _acquireEvidence.lastPosition;
+                    float wrappedX = (float)WorldConstants.WrapDeltaX(restored.x - expected.x, _game.Circumference);
+                    float wrappedZ = (float)WorldConstants.WrapDeltaZ(restored.z - expected.z, _game.Circumference);
+                    float restoredDistance = new Vector3(wrappedX, restored.y - expected.y, wrappedZ).magnitude;
+                    if (restoredDistance > 2)
                     { Finish("failed", "reload_did_not_restore_physically_reached_home_position", 1); return; }
                     if (_stableSince == 0) _stableSince = Time.realtimeSinceStartupAsDouble;
                     if (Time.realtimeSinceStartupAsDouble - _stableSince < 10) return;

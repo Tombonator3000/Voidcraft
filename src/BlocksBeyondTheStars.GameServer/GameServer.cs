@@ -4530,8 +4530,8 @@ public sealed partial class GameServer
         // BODY position to the block CENTRE off a move stream that only updates at 10 Hz (unreliable) — three
         // stacked discrepancies (eye offset ~0.8, centre-vs-face up to ~0.87, movement lag ~1) that made
         // legitimate mines bounce with "Out of reach" (2026-06-10 bug). Measure to the nearest point of the
-        // block instead — vertically against the player's body segment (anchor-agnostic), X the short way
-        // round the longitude seam — with a small slack for the move-stream lag. HandleMove fully trusts the
+        // block instead — vertically against the player's body segment (anchor-agnostic), X and Z the short
+        // way round their seams — with a small slack for the move-stream lag. HandleMove fully trusts the
         // reported position anyway, so this stays a sanity bound, not an anti-cheat wall.
         double dx = System.Math.Abs(WorldConstants.WrapDeltaX((block.X + 0.5) - player.Position.X, _world.Circumference));
         dx = System.Math.Max(0.0, dx - 0.5); // to the near face, not the centre
@@ -4541,7 +4541,8 @@ public sealed partial class GameServer
         double dy = by < lo ? lo - by : by > hi ? by - hi : 0.0;
         dy = System.Math.Max(0.0, dy - 0.5);
 
-        double dz = System.Math.Abs((block.Z + 0.5) - player.Position.Z);
+        double dz = System.Math.Abs(WorldConstants.WrapDeltaZ((block.Z + 0.5) - player.Position.Z,
+            _world.Circumference));
         dz = System.Math.Max(0.0, dz - 0.5);
 
         const double slack = 1.0; // covers the 10 Hz move-stream trailing the true position while walking
@@ -4549,9 +4550,9 @@ public sealed partial class GameServer
         return dx * dx + dy * dy + dz * dz <= max * max;
     }
 
-    /// <summary>Squared distance between two on-planet positions measured the short way round the longitude
-    /// seam — every surface proximity check uses this so a creature/door/vendor/container just across X = 0 is
-    /// adjacent, not a world away, at this world's size. (Space combat keeps plain distances.)</summary>
+    /// <summary>Squared distance between two on-planet positions measured the short way round both world
+    /// seams — every surface proximity check uses this so a creature/door/vendor/container just across a seam
+    /// is adjacent, not a world away, at this world's size. (Space combat keeps plain distances.)</summary>
     private double WrapDistSq(Vector3f a, Vector3f b) => WorldConstants.WrapDistanceSquared(a, b, _world.Circumference);
 
     /// <summary>Wrap-aware squared distance from a position to a block cell (the cell's min corner).</summary>

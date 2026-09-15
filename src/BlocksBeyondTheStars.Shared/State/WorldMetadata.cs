@@ -132,6 +132,9 @@ public sealed class StructurePlacementRecord
     public int Z { get; set; }
     /// <summary>Zero retains the original geometry of saves written before versioned structures.</summary>
     public int GeometryVersion { get; set; }
+    /// <summary>Zero preserves sites created before local landscape stamping. Existing sites are never
+    /// upgraded implicitly, and even a constrained/skipped proposal records its creation-time version.</summary>
+    public int LandscapeVersion { get; set; }
     /// <summary>Optional full terrain/approach reservation. Missing values retain the original template
     /// footprint; stamped cells still live only in persisted world deltas.</summary>
     public StructureReservationBounds? Reservation { get; set; }

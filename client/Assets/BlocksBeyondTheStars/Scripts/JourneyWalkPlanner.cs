@@ -11,17 +11,34 @@ namespace BlocksBeyondTheStars.Client
     internal static class JourneyWalkPlanner
     {
         private const float Cell = 0.75f;
-        private const int Radius = 24; // 18 m: inspect a detour beyond the old 6.75 m greedy window
-        private const int NodeBudget = 2048;
+        // The Veyl vault deliberately includes a broken bridge and a side return. Keep the search
+        // bounded, but allow a short return waypoint to route around a local terrain/mesh pocket too;
+        // distance alone is not evidence that the direct corridor is the only observed option.
+        private const int LocalRadius = 24;  // 18 m: ordinary step/door navigation plus bounded local detours
+        private const int DetourRadius = 48; // 36 m: controlled detour around the broken bridge
+        private const int LocalNodeBudget = 4096;
+        private const int DetourNodeBudget = 4096;
         private static readonly RaycastHit[] FloorHits = new RaycastHit[24];
         private static readonly RaycastHit[] SweepHits = new RaycastHit[24];
         private static readonly Collider[] Overlaps = new Collider[32];
+        private static readonly Vector2[] FloorOffsets =
+        {
+            Vector2.zero, Vector2.left, Vector2.right, Vector2.up, Vector2.down,
+            new(-0.7071068f, -0.7071068f), new(0.7071068f, -0.7071068f),
+            new(-0.7071068f, 0.7071068f), new(0.7071068f, 0.7071068f),
+        };
+
+        internal static bool Arrived(Vector3 position, Vector3 goal, float reach, bool matchHeight)
+            => new Vector2(position.x - goal.x, position.z - goal.z).sqrMagnitude <= reach * reach
+                && (!matchHeight || Mathf.Abs(position.y - goal.y) < 1.25f);
 
         [Serializable]
         internal sealed class Rejection
         {
             public string reason, collider;
-            public Vector3 position;
+            public Vector3 position, candidatePosition, colliderMin, colliderMax;
+            public bool hasCandidate, hasColliderBounds;
+            public string colliderParent;
         }
 
         [Serializable]
@@ -33,7 +50,7 @@ namespace BlocksBeyondTheStars.Client
             public float walkedForGoal;
             public Vector3 origin, goal, endpoint;
             public List<Rejection> examples = new();
-            public void Reject(string reason, Vector3 position, Collider blocker = null)
+            public void Reject(string reason, Vector3 position, Collider blocker = null, Vector3? candidate = null)
             {
                 switch (reason)
                 {
@@ -45,7 +62,15 @@ namespace BlocksBeyondTheStars.Client
                     case "query_capacity": queryCapacity++; break;
                 }
                 if (examples.Count < 12)
-                    examples.Add(new Rejection { reason = reason, position = position, collider = blocker == null ? string.Empty : blocker.name });
+                    examples.Add(new Rejection
+                    {
+                        reason = reason, position = position, collider = blocker == null ? string.Empty : blocker.name,
+                        hasCandidate = candidate.HasValue, candidatePosition = candidate ?? position,
+                        hasColliderBounds = blocker != null,
+                        colliderMin = blocker != null ? blocker.bounds.min : Vector3.zero,
+                        colliderMax = blocker != null ? blocker.bounds.max : Vector3.zero,
+                        colliderParent = blocker != null && blocker.transform.parent != null ? blocker.transform.parent.name : string.Empty,
+                    });
             }
         }
 
@@ -96,6 +121,7 @@ namespace BlocksBeyondTheStars.Client
             private readonly Vector3 _origin, _goal;
             private readonly bool _matchHeight;
             private readonly float _reach;
+            private readonly int _radius;
             private readonly int _nodeBudget;
             private readonly Dictionary<Vector2Int, Node> _nodes = new();
             private readonly List<Node> _open = new();
@@ -105,10 +131,14 @@ namespace BlocksBeyondTheStars.Client
             public bool Done { get; private set; }
 
             public Search(PlayerController player, CharacterController capsule, Vector3 goal,
-                float reach, bool matchHeight, Memory memory, int nodeBudget = NodeBudget)
+                float reach, bool matchHeight, Memory memory, int nodeBudget = -1)
             {
                 _player = player; _capsule = capsule; _goal = goal; _origin = player.transform.position;
-                _reach = reach; _matchHeight = matchHeight; _memory = memory; _nodeBudget = nodeBudget;
+                _reach = reach; _matchHeight = matchHeight; _memory = memory;
+                float horizontalGoalDistance = new Vector2(_origin.x - goal.x, _origin.z - goal.z).magnitude;
+                bool needsDetour = horizontalGoalDistance > 12f;
+                _radius = needsDetour ? DetourRadius : LocalRadius;
+                _nodeBudget = nodeBudget > 0 ? nodeBudget : needsDetour ? DetourNodeBudget : LocalNodeBudget;
                 Diagnostics = new Report { origin = _origin, goal = goal, walkedForGoal = memory.Walked, planNumber = memory.Plans + 1 };
                 if (memory.Exhausted) { Complete("goal_exploration_budget_exhausted"); return; }
                 memory.BeginPlan();
@@ -131,16 +161,16 @@ namespace BlocksBeyondTheStars.Client
                     var current = _open[index]; _open.RemoveAt(index);
                     if (current.Closed) continue;
                     current.Closed = true; expanded++; Diagnostics.visitedNodes++;
-                    if (Distance(current.Position, _goal) <= _reach)
+                    if (Arrived(current.Position, _goal, _reach, _matchHeight))
                     { UseRoute(current, "goal_route"); return; }
-                    if (Mathf.Abs(current.Key.x) == Radius || Mathf.Abs(current.Key.y) == Radius)
+                    if (Mathf.Abs(current.Key.x) == _radius || Mathf.Abs(current.Key.y) == _radius)
                     { _boundary.Add(current); Diagnostics.boundaryNodes++; }
                     for (int x = -1; x <= 1; x++)
                     for (int z = -1; z <= 1; z++)
                     {
                         if (x == 0 && z == 0) continue;
                         var key = current.Key + new Vector2Int(x, z);
-                        if (Mathf.Abs(key.x) > Radius || Mathf.Abs(key.y) > Radius) continue;
+                        if (Mathf.Abs(key.x) > _radius || Mathf.Abs(key.y) > _radius) continue;
                         if (_nodes.TryGetValue(key, out var existing) && existing.Closed) continue;
                         Vector3 sample = new(_origin.x + key.x * Cell, current.Position.y, _origin.z + key.y * Cell);
                         if (!TryFloor(_player, _capsule, sample, out var next, Diagnostics)
@@ -217,32 +247,42 @@ namespace BlocksBeyondTheStars.Client
             float radius = capsule.radius + 0.015f;
             if (!Observed(player, sample - new Vector3(radius, 2.2f, radius),
                 sample + new Vector3(radius, capsule.height + 1.2f, radius), report)) return false;
-            int count = Physics.RaycastNonAlloc(sample + Vector3.up * 1.2f, Vector3.down, FloorHits, 3.5f, ~0, QueryTriggerInteraction.Ignore);
-            if (count >= FloorHits.Length) { report?.Reject("query_capacity", sample); return false; }
             float top = float.NegativeInfinity;
             string reason = "no_floor";
             Collider blocker = null;
-            for (int i = 0; i < count; i++)
+            Vector3? rejectedCandidate = null;
+            // Keep a clear centre-floor height: a low edge beside the rounded capsule must not lift
+            // a valid route into a ceiling. Only a blocked/missing centre floor needs the other eight
+            // bounded footprint rays (e.g. a stair's high tread). Each height still checks the SAME
+            // centred capsule; this is a clearance waypoint, not an injected resting/body pose.
+            foreach (var offset in FloorOffsets)
             {
-                var hit = FloorHits[i];
-                if (Self(player, hit.collider)) continue;
-                if (hit.normal.y < Mathf.Cos(capsule.slopeLimit * Mathf.Deg2Rad)
-                    || hit.point.y > sample.y + 1.05f || hit.point.y < sample.y - 2.1f)
-                { reason = "slope_or_height"; blocker = hit.collider; continue; }
-                if (hit.point.y <= top) continue;
-                Vector3 candidate = new(sample.x, hit.point.y + 0.03f, sample.z);
-                Vector3 lower = candidate + Vector3.up * (radius + 0.025f);
-                Vector3 upper = candidate + Vector3.up * (capsule.height - radius);
-                int overlaps = Physics.OverlapCapsuleNonAlloc(lower, upper, radius, Overlaps, ~0, QueryTriggerInteraction.Ignore);
-                if (overlaps >= Overlaps.Length) { report?.Reject("query_capacity", sample); return false; }
-                bool clear = true;
-                for (int j = 0; j < overlaps; j++)
-                    if (!Self(player, Overlaps[j])) { clear = false; blocker = Overlaps[j]; break; }
-                if (!clear) { reason = "headroom"; continue; }
-                top = hit.point.y; feet = candidate;
+                Vector3 ray = sample + new Vector3(offset.x * capsule.radius * 0.98f, 1.2f, offset.y * capsule.radius * 0.98f);
+                int count = Physics.RaycastNonAlloc(ray, Vector3.down, FloorHits, 3.5f, ~0, QueryTriggerInteraction.Ignore);
+                if (count >= FloorHits.Length) { report?.Reject("query_capacity", sample); return false; }
+                for (int i = 0; i < count; i++)
+                {
+                    var hit = FloorHits[i];
+                    if (Self(player, hit.collider)) continue;
+                    if (hit.normal.y < Mathf.Cos(capsule.slopeLimit * Mathf.Deg2Rad)
+                        || hit.point.y > sample.y + 1.05f || hit.point.y < sample.y - 2.1f)
+                    { reason = "slope_or_height"; blocker = hit.collider; continue; }
+                    if (hit.point.y <= top) continue;
+                    Vector3 candidate = new(sample.x, hit.point.y + 0.03f, sample.z);
+                    Vector3 lower = candidate + Vector3.up * (radius + 0.025f);
+                    Vector3 upper = candidate + Vector3.up * (capsule.height - radius);
+                    int overlaps = Physics.OverlapCapsuleNonAlloc(lower, upper, radius, Overlaps, ~0, QueryTriggerInteraction.Ignore);
+                    if (overlaps >= Overlaps.Length) { report?.Reject("query_capacity", sample, candidate: candidate); return false; }
+                    bool clear = true;
+                    for (int j = 0; j < overlaps; j++)
+                        if (!Self(player, Overlaps[j])) { clear = false; blocker = Overlaps[j]; break; }
+                    if (!clear) { reason = "headroom"; rejectedCandidate = candidate; continue; }
+                    top = hit.point.y; feet = candidate;
+                }
+                if (offset == Vector2.zero && !float.IsNegativeInfinity(top)) return true;
             }
             if (!float.IsNegativeInfinity(top)) return true;
-            report?.Reject(reason, sample, blocker); return false;
+            report?.Reject(reason, sample, blocker, rejectedCandidate); return false;
         }
 
         private static bool ClearStep(PlayerController player, CharacterController capsule, Vector3 from, Vector3 to, Report report)
