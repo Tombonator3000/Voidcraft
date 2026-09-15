@@ -28,7 +28,8 @@ public sealed class VeylSignalNetworkTests
         server.Send(1, Encode(new BlockChanged { X = 1, Y = 2, Z = 3, Glow = 0x66ECFF }), DeliveryMode.ReliableOrdered);
         server.Send(1, Encode(new VeylSignalResponse
         {
-            EventId = "site-response", Nodes = new[] { new VeylSignalNode { X = 1, Y = 2, Z = 3 } },
+            EventId = "site-response",
+            Nodes = new[] { new VeylSignalNode { X = 1, Y = 2, Z = 3 } },
         }), DeliveryMode.ReliableOrdered);
         client.Poll();
         Assert.Equal(new[] { "block", "site-response" }, received);

@@ -114,9 +114,144 @@ public sealed partial class GameServer
             wet |= candidateWet;
             prisms++;
         }
+        // The survey site is also the first long-form walking beat. A fresh-world placement can be
+        // locally safe yet still sit behind a natural mesa between the landing pad and the signal. Add a
+        // broad, five-cell basalt trail on virgin worlds so the player gets a visible, buildable route to
+        // the landmark. This is ordinary voxel terrain: it is persisted, collidable and removable, and it
+        // is never used to move the player or bypass the authoritative survey checks.
+        bool routeAdded = false;
+        if (_landingPads.Count > 0)
+        {
+            var pad = _landingPads[0];
+            // The starter hull's rear hatch opens on the -Z side of the pad. Begin just outside the
+            // reserved landing volume so the first authored cells bridge the actual hatch-to-ground
+            // transition; starting at the pad centre left a natural wall between the player and the
+            // otherwise valid long-distance trail. The pad itself remains reserved and untouched.
+            int startX = pad.CenterX, startZ = pad.CenterZ - LandingPadRadius + 1;
+            // Carry the final landing across the approach apron to the front face of the authored
+            // surface plinth. Stopping at the apron edge left a three-cell natural drop before the
+            // signal deck, so a legitimate player could reach the right height and still fall beside
+            // the Veyl landmark. The outer lane reaches z == origin.Z - 1 while keeping the authored
+            // plinth row at z == origin.Z untouched.
+            int endX = origin.X + structure.Width / 2, endZ = origin.Z - 3;
+            int span = Math.Max(Math.Abs(endX - startX), Math.Abs(endZ - startZ));
+            int startFloor = _generator.SurfaceHeight(planet, pad.CenterX, pad.CenterZ);
+            int endFloor = _generator.SurfaceHeight(planet, endX, endZ);
+            int dx = endX - startX, dz = endZ - startZ;
+            bool alongX = Math.Abs(dx) >= Math.Abs(dz);
+            int previousFloor = startFloor;
+            var route = new Dictionary<(int X, int Z), VeylTerrainColumn>();
+            var candidate = new Dictionary<(int X, int Z), VeylTerrainColumn>(accepted);
+            int candidateAdded = addedCells;
+            var routeMin = min;
+            var routeMax = max;
+            bool validRoute = span > LandingPadRadius + 5;
+
+            for (int distance = 0; validRoute && distance <= span; distance++)
+            {
+                float t = (float)distance / span;
+                int cx = (int)Math.Round(startX + dx * t);
+                int cz = (int)Math.Round(startZ + dz * t);
+                int floor = (int)Math.Round(startFloor + (endFloor - startFloor) * t);
+                int rise = floor - previousFloor;
+                if (Math.Abs(rise) > 1)
+                {
+                    floor = previousFloor + Math.Sign(rise);
+                }
+
+                for (int lane = -2; validRoute && lane <= 2; lane++)
+                {
+                    int x = alongX ? cx : cx + lane;
+                    int z = alongX ? cz + lane : cz;
+                    if (_generator.IsSurfaceLava(planet, x, z)
+                        || _generator.TryGetWaterSurface(planet, x, z, out _, out _))
+                    {
+                        validRoute = false;
+                        break;
+                    }
+
+                    int natural = _generator.SurfaceHeight(planet, x, z);
+                    if (Math.Abs(floor - natural) > 16)
+                    {
+                        validRoute = false;
+                        break;
+                    }
+
+                    int supportTop = Math.Min(natural, floor - 1);
+                    int support = supportTop;
+                    while (support >= supportTop - 8
+                           && _content.BlockById(_world.GetBlock(new Vector3i(x, support, z)))?.Solid != true)
+                    {
+                        support--;
+                    }
+
+                    if (support < supportTop - 8 || floor - support > VeylBasaltLandformGenerator.SupportDepthLimit)
+                    {
+                        validRoute = false;
+                        break;
+                    }
+
+                    // Keep the travel ribbon materially anchored instead of leaving a one-cell paint
+                    // stripe on top of natural ground. The deeper fill remains hidden below the walking
+                    // surface, but makes the route survive terrain edits and satisfies the same minimum
+                    // support depth as the surrounding authored landforms.
+                    int reinforcedSupport = floor - 8;
+                    bool reinforced = reinforcedSupport >= supportTop - 8;
+                    for (int y = reinforcedSupport; reinforced && y <= supportTop; y++)
+                    {
+                        reinforced &= _content.BlockById(_world.GetBlock(new Vector3i(x, y, z)))?.Solid == true;
+                    }
+
+                    if (reinforced) support = reinforcedSupport;
+
+                    int shape = 0;
+                    if (floor != previousFloor)
+                    {
+                        int yaw = alongX
+                            ? (dx >= 0 ? 3 : 1)
+                            : (dz >= 0 ? 0 : 2);
+                        shape = ShapeCode.Pack(BlockShape.Stairs, floor > previousFloor ? yaw : (yaw + 2) & 3);
+                    }
+
+                    var key = (x, z);
+                    int clear = Math.Max(floor + 3, natural + 8);
+                    if (candidate.TryGetValue(key, out var existing))
+                    {
+                        if (existing.FloorY >= floor) continue;
+                        candidateAdded -= existing.FloorY - existing.SupportY;
+                    }
+
+                    candidate[key] = new VeylTerrainColumn(x, z, support, floor, clear, shape);
+                    route[key] = candidate[key];
+                    candidateAdded += floor - support;
+                    if (candidateAdded > VeylBasaltLandformGenerator.AddedCellLimit)
+                    {
+                        validRoute = false;
+                        break;
+                    }
+
+                    routeMin = new Vector3i(Math.Min(routeMin.X, x - 1), Math.Min(routeMin.Y, support - 1),
+                        Math.Min(routeMin.Z, z - 1));
+                    routeMax = new Vector3i(Math.Max(routeMax.X, x + 1), Math.Max(routeMax.Y, clear + 1),
+                        Math.Max(routeMax.Z, z + 1));
+                }
+
+                previousFloor = floor;
+            }
+
+            if (validRoute && route.Count > 0 && Math.Abs(previousFloor - endFloor) <= 1)
+            {
+                accepted = candidate;
+                addedCells = candidateAdded;
+                min = routeMin;
+                max = routeMax;
+                routeAdded = true;
+            }
+        }
+
         // Sorting gives a stable stamp order independent of dictionary enumeration implementation.
         var columns = accepted.Values.OrderBy(c => c.X).ThenBy(c => c.Z).ToList();
         return new VeylLandscapePlan(columns.Count == 0 ? null : new VeylTerrainPlan(min, max, wet, columns),
-            prisms, addedCells, prisms >= 6 ? "clustered" : "limited:" + lastRejected);
+            prisms, addedCells, routeAdded ? "clustered+access_route" : prisms >= 6 ? "clustered" : "limited:" + lastRejected);
     }
 }

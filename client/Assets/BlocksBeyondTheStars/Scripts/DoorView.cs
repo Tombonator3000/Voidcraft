@@ -55,12 +55,17 @@ namespace BlocksBeyondTheStars.Client
                 _subscribed = true;
             }
 
+            AdvanceDoors(Time.deltaTime);
+        }
+
+        private void AdvanceDoors(float deltaTime)
+        {
             foreach (var d in _doors.Values)
             {
                 d.Go.transform.position = Game != null ? Game.ScenePos(d.World.x, d.World.y, d.World.z) : d.World;
 
                 float target = d.Open ? 1f : 0f;
-                d.Anim = Mathf.MoveTowards(d.Anim, target, Time.deltaTime * AnimSpeed);
+                d.Anim = Mathf.MoveTowards(d.Anim, target, deltaTime * AnimSpeed);
                 Animate(d);
 
                 // Use the actual opening, including panel thickness, rather than one animation fraction
@@ -71,6 +76,12 @@ namespace BlocksBeyondTheStars.Client
                 }
             }
         }
+
+        /// <summary>True only after the received open state has animated far enough for this view's real
+        /// blocking collider to be disabled. Callers that drive an observed physical route must not treat the
+        /// server state alone as proof that the local passage is already clear.</summary>
+        internal bool IsPassageClear(int doorId)
+            => _doors.TryGetValue(doorId, out var door) && door.Collider != null && !door.Collider.enabled;
 
         /// <summary>Door kinds that swing on a single leaf and are opened by hand with E. The wooden door is the
         /// cheap early-game variant of the hinge door, so it looks and behaves the same way — only the material

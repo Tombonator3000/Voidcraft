@@ -4,7 +4,7 @@ The single source of truth for **what is built** and **what is still open**. Des
 plans live under [docs/](docs/) (committed); the long-range direction is the strategy trio in
 [docs/strategy/](docs/strategy/vision.md) (vision · mission · roadmap); this file is the high-level status. Player-facing operation
 (controls, mechanics, editors, commands) is documented in [docs/user/USER_MANUAL.md](docs/user/USER_MANUAL.md) —
-keep it current when controls/features change. Last consolidated 2026-06-04.
+keep it current when controls/features change. Last consolidated 2026-09-15.
 
 **Build:** `scripts/build-client.ps1` (Windows) or `scripts/build-client.sh` (Linux) — publishes shared libs + bundled server + Unity player.
 **Test:** `./scripts/run-tests.sh` — currently **1547 server + 194 client passing** (2026-08-09). Locale parity (en/de) is enforced by a test.
@@ -21,6 +21,19 @@ are not a spending allowance for this implementation.
 Architecture: Unity 6 (URP since 2026-06-10) client + authoritative .NET 10 server, everything built in
 code (no scene authoring). One shared world; MessagePack networking for native clients plus a WebGL JSON
 envelope at the WebSocket edge; deterministic seed world-gen; SQLite default persistence with opt-in PostgreSQL.
+
+## Active Gauntlet continuation — 2026-09-15
+
+The approved continuation is tracked in [GAUNTLET_STATUS_2026-09-15.md](docs/developer/GAUNTLET_STATUS_2026-09-15.md).
+The ordinary seed-4242 expedition and second-process reload pass on a fresh `1280x720` Windowed/VSync-off
+test profile; the default `1920x1080` borderless/VSync profile still stalls in Loading at roughly 1 FPS.
+The latest `Linux-gauntlet11bh` candidate moves rocky lowlands to basalt/stone, reduces atlas noise,
+deepens rocky atmosphere, suppresses rocky flora glow, darkens crystal-like outcrops and reduces
+non-shell bloom/exposure. Those changes remain under visual-matrix review; the visual gate is not green.
+Treblo remains explicitly `UNAVAILABLE`, and the measured High/OpenGLCore performance sample is invalid
+for acceptance because it had zero focused frames and no prepared traversal phase. Unity EditMode is
+106/106 and PlayMode is 10/10 on the latest source; final target-profile journey/reload and focused
+performance evidence remain open.
 
 ---
 

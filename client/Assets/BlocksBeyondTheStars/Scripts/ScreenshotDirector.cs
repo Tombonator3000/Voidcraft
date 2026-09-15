@@ -45,6 +45,7 @@ namespace BlocksBeyondTheStars.Client
         private string _lang = "en";
         private long _seed = DefaultSeed;
         private string _outDir;
+        private string _worldName = WorldName;
         private bool _headless; // true = launched via the -captureShots command line (exit the process when done)
         private string _planet; // when set (-planet <key>), capture ONLY that planet's surface (surface_<key>.png)
         private string _startPlanet; // optional -startPlanet selects the world for the full concept sequence
@@ -80,7 +81,11 @@ namespace BlocksBeyondTheStars.Client
                 a => string.Equals(a, "-captureConcepts", StringComparison.OrdinalIgnoreCase));
             var args = Environment.GetCommandLineArgs();
             for (int i = 0; i + 1 < args.Length; i++)
+            {
                 if (string.Equals(args[i], "-startPlanet", StringComparison.OrdinalIgnoreCase)) d._startPlanet = args[i + 1];
+                else if (string.Equals(args[i], "-captureWorld", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(args[i + 1])) d._worldName = args[i + 1];
+            }
         }
 
         private static bool CaptureRequested(out string lang, out string outDir, out long seed, out bool headless, out string planet, out bool credits)
@@ -243,7 +248,7 @@ namespace BlocksBeyondTheStars.Client
             // Sandbox worlds keep enemies, bandit turrets and the temperature hazard off (they all gate on
             // Survival), so no "Taking damage!" warning or attack fx can land in a frame — the HUD itself
             // (bars, minimap, hotbar) looks the same as in Survival.
-            shell.StartSingleplayerWorld(WorldName, _seed, creativeUnlockAll: true, creativeAllShips: true, creativeKit: true,
+            shell.StartSingleplayerWorld(_worldName, _seed, creativeUnlockAll: true, creativeAllShips: true, creativeKit: true,
                 sandbox: true, worldOptions: string.IsNullOrEmpty(_startPlanet) ? null
                     : new WorldCreationOptions { StartPlanetType = _startPlanet });
 
@@ -410,7 +415,7 @@ namespace BlocksBeyondTheStars.Client
                     continue;
                 }
                 yield return new WaitForSecondsRealtime(PoseSettle);
-                yield return Capture(Path.Combine(dir, view == 0 ? "ship_home_forward.png" : "ship_home_aft.png"));
+                yield return Capture(Path.Combine(dir, view == 0 ? "ship_home_forward.png" : "ship_home_aft.png"), cleanWorld: true);
             }
             pc.SetCapturePose(saved, savedYaw, savedPitch);
             yield return WaitUntil(() => pc.IsCaptureGrounded, 10f);
@@ -420,9 +425,12 @@ namespace BlocksBeyondTheStars.Client
         {
             var pc = FindAnyObjectByType<PlayerController>();
             if (pc == null || pc.Camera == null) yield break;
-            pc.SetLookAngles(pc.transform.eulerAngles.y, 32f);
+            // Concept comparisons use the approved warm-amber / cool-indigo lighting target. This is capture-only;
+            // ordinary gameplay retains the authoritative world clock and weather.
+            boot.SetCaptureEnvironment(0.28f);
+            pc.SetLookAngles(pc.transform.eulerAngles.y, 8f);
             yield return new WaitForSecondsRealtime(PoseSettle);
-            yield return Capture(Path.Combine(dir, "terrain_materials.png"));
+            yield return Capture(Path.Combine(dir, "terrain_materials.png"), cleanWorld: true);
 
             var site = Array.Find(boot.PlanetPois, p => p.Type == "veyl_signal");
             if (site == null)
@@ -469,10 +477,10 @@ namespace BlocksBeyondTheStars.Client
                 _failedViews++;
                 yield break;
             }
-            boot.SetCaptureEnvironment(0.38f);
+            boot.SetCaptureEnvironment(0.30f);
             yield return new WaitForSecondsRealtime(ChunkSettle);
             pc.SetLookAngles(45f, 8f);
-            yield return Capture(Path.Combine(dir, "veyl_approach.png"));
+            yield return Capture(Path.Combine(dir, "veyl_approach.png"), cleanWorld: true);
             File.WriteAllText(Path.Combine(dir, "concept-view-context.txt"),
                 "Actual Unity player rendering; scripted pose/visual-time setup, not a player journey.\n"
                 + $"Veyl target {site.X}, {site.Z}; player {boot.PlayerPosition}; image {Screen.width}x{Screen.height}.\n");
@@ -538,7 +546,7 @@ namespace BlocksBeyondTheStars.Client
                 yield break;
             }
             yield return new WaitForSecondsRealtime(PoseSettle);
-            yield return Capture(Path.Combine(dir, "veyl_vault.png"));
+            yield return Capture(Path.Combine(dir, "veyl_vault.png"), cleanWorld: true);
         }
 
         private static bool TryCaptureFloor(PlayerController pc, Vector3 origin, float distance, out RaycastHit floor)
@@ -566,7 +574,7 @@ namespace BlocksBeyondTheStars.Client
         private IEnumerator CapturePlanetSurface(AppShell shell, string dir)
         {
             // A distinct world name per planet so each run is its own fresh save (no leftover state between types).
-            string worldName = WorldName + "_" + _planet;
+            string worldName = _worldName + "_" + _planet;
             var opts = new WorldCreationOptions { StartPlanetType = _planet };
             shell.StartSingleplayerWorld(worldName, _seed, creativeUnlockAll: true, creativeAllShips: true,
                 creativeKit: true, sandbox: true, worldOptions: opts);
@@ -683,7 +691,7 @@ namespace BlocksBeyondTheStars.Client
 #endif
         }
 
-        private IEnumerator Capture(string path)
+        private IEnumerator Capture(string path, bool cleanWorld = false)
         {
             var boot = FindAnyObjectByType<GameBootstrap>();
             if (_concepts && boot != null && !boot.InSpace)
@@ -736,6 +744,9 @@ namespace BlocksBeyondTheStars.Client
             FindAnyObjectByType<GameBootstrap>()?.ShowMessage(string.Empty);
             yield return new WaitForSecondsRealtime(0.25f);
             yield return new WaitForEndOfFrame(); // let the pipeline finish the frame before reading it back
+            var hud = cleanWorld ? FindAnyObjectByType<HudUi>() : null;
+            bool restoreHud = hud != null && hud.SetCaptureVisible(false);
+            yield return new WaitForEndOfFrame(); // the disabled HUD must be absent from the composited frame
             Texture2D tex = null;
             try
             {
@@ -751,6 +762,10 @@ namespace BlocksBeyondTheStars.Client
             }
             finally
             {
+                if (hud != null)
+                {
+                    hud.SetCaptureVisible(restoreHud);
+                }
                 if (tex != null)
                 {
                     Destroy(tex);

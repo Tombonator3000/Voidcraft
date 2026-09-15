@@ -55,6 +55,7 @@ namespace BlocksBeyondTheStars.Client
         private float _walked;
         private int _scannerSlot = -1, _vantage, _scanFrame = -1, _exitCode;
         private bool _attached, _finished, _returnedToMenu, _physicalExit, _surfaceScan;
+        private bool _stairObservationLogged;
         private StreamWriter _events;
         private string _lastScanInfo;
 
@@ -248,7 +249,9 @@ namespace BlocksBeyondTheStars.Client
                     { Finish("failed", "unexpected_position_discontinuity", 1); return; }
                     _walked += moved;
                     _lastPosition = current;
-                    if (!_returning && (_breadcrumbs.Count == 0 || Vector3.Distance(current, _breadcrumbs[_breadcrumbs.Count - 1]) >= 1f))
+                    // Keep the measured route dense enough that the return cannot cut a diagonal
+                    // across the authored broken bridge or a shaped stair edge after the world changes.
+                    if (!_returning && (_breadcrumbs.Count == 0 || Vector3.Distance(current, _breadcrumbs[_breadcrumbs.Count - 1]) >= 0.4f))
                         _breadcrumbs.Add(current);
                     if (Time.realtimeSinceStartupAsDouble >= _nextSample)
                     {
@@ -330,7 +333,7 @@ namespace BlocksBeyondTheStars.Client
                     var latestDoor = _doors.FirstOrDefault(d => d.Id == _door.Id);
                     if (latestDoor != null) _door = latestDoor;
                     Aim(DoorPosition() + Vector3.up, ref input);
-                    if (_door.Open)
+                    if (DoorPassageReady(_door, DoorView.Instance))
                     {
                         var origin = _game.ScenePos(_home.Origin.X, _home.Origin.Y, _home.Origin.Z);
                         _goal = DoorPosition();
@@ -338,7 +341,7 @@ namespace BlocksBeyondTheStars.Client
                         else _goal.z = origin.z + (_doorNormal.z > 0 ? _home.Length + 2 : -2);
                         Enter(Step.LeaveHull, 45);
                     }
-                    else if ((_door.Kind == "hinge" || _door.Kind == "wood") && _scanFrame < 0)
+                    else if (_scanFrame < 0)
                     { input.Press(InputAction.Interact); _scanFrame = Time.frameCount; }
                     return;
                 case Step.LeaveHull:
@@ -378,7 +381,8 @@ namespace BlocksBeyondTheStars.Client
                     if (_game.ItemInSlot(8) == _equipItem && HotbarActionUi.Instance?.IsOpen != true) FinishEquip();
                     return;
                 case Step.SignalWalk:
-                    if (WalkToward(_goal, 0.65f, ref input, matchHeight: false)) Enter(Step.SignalAim, 8);
+                    if (WalkToward(_goal, 0.65f, ref input, matchHeight: false,
+                        allowObservedNavigationFailure: true, allowDirectObservedFallback: true)) Enter(Step.SignalAim, 8);
                     return;
                 case Step.SignalAim:
                     if (!FindVisibleRune(out _rune))
@@ -434,6 +438,9 @@ namespace BlocksBeyondTheStars.Client
             return _door != null;
         }
 
+        internal static bool DoorPassageReady(NetDoor door, DoorView view)
+            => door != null && door.Open && view != null && view.IsPassageClear(door.Id);
+
         private void BeginSignalWalk()
         {
             var poi = Poi("veyl_signal");
@@ -457,7 +464,8 @@ namespace BlocksBeyondTheStars.Client
             return Mathf.Abs(dy) < 1.5f && Mathf.Abs(dp) < 1.5f;
         }
 
-        private bool WalkToward(Vector3 goal, float reach, ref JourneyInputSource.Frame input, bool matchHeight = true)
+        private bool WalkToward(Vector3 goal, float reach, ref JourneyInputSource.Frame input, bool matchHeight = true,
+            bool allowObservedNavigationFailure = false, bool allowDirectObservedFallback = false)
         {
             if (_game.MenuOpen) return false; // modal input must never be forced through the controller
             Vector3 pos = _player.transform.position;
@@ -491,12 +499,29 @@ namespace BlocksBeyondTheStars.Client
                 Log("navigation_plan", "waypoints=" + _path.Count + ":" + _navigationReport.status);
                 _navigationSearch = null;
                 if (_path.Count == 0)
-                { Finish("failed", "navigation_" + _navigationReport.status, 1); return false; }
+                {
+                    if (allowDirectObservedFallback)
+                    {
+                        // The authored stair chain is already observed cell-by-cell. If the bounded
+                        // physics search exhausts on a streamed chunk seam, keep using ordinary
+                        // controller input toward that observed tread; this never changes the player
+                        // pose or bypasses collision.
+                        ApplyObservedDirectInput(pos, goal, ref input);
+                        return false;
+                    }
+                    if (allowObservedNavigationFailure) return false;
+                    Finish("failed", "navigation_" + _navigationReport.status, 1); return false;
+                }
                 _progressPosition = pos; _lastProgress = Time.realtimeSinceStartupAsDouble;
             }
             if (Time.realtimeSinceStartupAsDouble - _lastProgress > 12)
             { Finish("failed", "physical_navigation_stalled", 1); return false; }
-            if (_path.Count == 0) return false;
+            if (_path.Count == 0)
+            {
+                if (!allowDirectObservedFallback) return false;
+                ApplyObservedDirectInput(pos, goal, ref input);
+                return false;
+            }
             Vector3 target = _path[0];
             Aim(new Vector3(target.x, _player.Camera.transform.position.y, target.z), ref input);
             float yaw = Mathf.Atan2(target.x - pos.x, target.z - pos.z) * Mathf.Rad2Deg;
@@ -515,6 +540,27 @@ namespace BlocksBeyondTheStars.Client
         }
 
         internal static float HorizontalDistance(Vector3 a, Vector3 b) => new Vector2(a.x - b.x, a.z - b.z).magnitude;
+
+        private void ApplyObservedDirectInput(Vector3 pos, Vector3 goal, ref JourneyInputSource.Frame input)
+        {
+            Aim(new Vector3(goal.x, _player.Camera.transform.position.y, goal.z), ref input);
+            Vector3 local = _player.transform.InverseTransformDirection(goal - pos);
+            Vector2 horizontal = new(local.x, local.z);
+            if (horizontal.sqrMagnitude > 0.0001f)
+            {
+                input.Move = Vector2.ClampMagnitude(horizontal / 0.8f, 1f);
+                if ((goal.y < pos.y - 0.2f || goal.y > pos.y + _capsule.stepOffset + 0.05f)
+                    && _capsule.isGrounded && Time.realtimeSinceStartupAsDouble >= _nextJump)
+                {
+                    // A shaped stair's downward riser can hold the capsule just before its edge.
+                    // Jumping is ordinary controller input and lets gravity settle onto the next
+                    // observed tread; it does not alter the pose or bypass collision.
+                    input.JumpDown = input.JumpHeld = true;
+                    _nextJump = Time.realtimeSinceStartupAsDouble + 0.9;
+                }
+            }
+            if (_navigationReport != null) _navigationReport.status = "direct_input_fallback";
+        }
 
         private bool FindVisibleRune(out Vector3 point)
         {

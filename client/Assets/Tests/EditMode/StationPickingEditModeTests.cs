@@ -118,6 +118,58 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         }
 
         [Test]
+        public void CockpitHoloMap_RevealsThePersistedVeylSignalLiveAndAfterRebuild()
+        {
+            SetStations(new[] { new NetShipStation { Type = "cockpit", X = 0f, Y = 0f, Z = 0f } });
+            typeof(GameBootstrap).GetProperty("StarMap").SetValue(_game, new StarMapData
+            {
+                ActiveLocationId = "home",
+                Systems = new[]
+                {
+                    new NetStarSystem
+                    {
+                        Id = "system",
+                        Bodies = new[] { new NetBody { Id = "home", PlanetType = "rocky" } },
+                    },
+                },
+            });
+            SetVeylSurveyComplete(false);
+
+            var projection = RefreshHoloMap();
+            var systemBodies = projection.Find("System bodies");
+            Assert.IsNotNull(systemBodies);
+            Assert.IsNull(projection.Find("Veyl discovery signal"),
+                "The map must not reveal the discovery before the authoritative completion state arrives.");
+
+            SetVeylSurveyComplete(true);
+            RefreshHoloMap(projection);
+            var signal = projection.Find("Veyl discovery signal");
+            Assert.IsNotNull(signal);
+            Assert.IsTrue(signal.gameObject.activeSelf);
+            Assert.AreSame(systemBodies, projection.Find("System bodies"),
+                "A live progress update must not rebuild the settled system projection.");
+            Assert.IsEmpty(signal.GetComponentsInChildren<Collider>());
+            Assert.LessOrEqual(signal.GetComponentsInChildren<Renderer>().Length, 2,
+                "The persistent response must retain the bounded shared-equipment draw pattern.");
+
+            SetVeylSurveyComplete(false);
+            RefreshHoloMap(projection);
+            Assert.IsFalse(signal.gameObject.activeSelf, "A reset player state must not leave stale discovery UI.");
+            SetVeylSurveyComplete(true);
+            RefreshHoloMap(projection);
+            Assert.AreSame(signal, projection.Find("Veyl discovery signal"),
+                "Repeated state packets must reuse the existing shared marker rather than duplicate it.");
+
+            SetStations(new[] { new NetShipStation { Type = "cockpit", X = 1f, Y = 0f, Z = 0f } });
+            var rebuilt = RefreshHoloMap();
+            Assert.AreNotSame(projection, rebuilt);
+            var rebuiltSignal = rebuilt.Find("Veyl discovery signal");
+            Assert.IsNotNull(rebuiltSignal);
+            Assert.IsTrue(rebuiltSignal.gameObject.activeSelf,
+                "A rebuilt cockpit must reconstruct the marker from the persisted authoritative state.");
+        }
+
+        [Test]
         public void PickerRejectsAnotherGameOwnerAndDoesNotIncludeProjectionChildren()
         {
             SetStations(new[] { new NetShipStation { Type = "cockpit", X = 0f, Y = 0f, Z = 0f } });
@@ -142,6 +194,24 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
 
         private void SetStations(NetShipStation[] stations)
             => typeof(GameBootstrap).GetProperty("Stations").SetValue(_game, stations);
+
+        private void SetVeylSurveyComplete(bool complete)
+            => typeof(GameBootstrap).GetProperty("VeylSurveyComplete").SetValue(_game, complete);
+
+        private Transform RefreshHoloMap(Transform projection = null)
+        {
+            _game.LookedStationType(_camera, 4f); // refreshes fixtures before the view's next Update
+            projection ??= _root.transform.Find("cockpit fixture/LocalSystemProjection");
+            Assert.IsNotNull(projection);
+            var type = typeof(StationDecorView).GetNestedType("HoloMap", BindingFlags.NonPublic);
+            Assert.IsNotNull(type);
+            var view = projection.GetComponent(type);
+            Assert.IsNotNull(view);
+            var refresh = type.GetMethod("RefreshMap", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(refresh);
+            refresh.Invoke(view, null);
+            return projection;
+        }
 
         [Test]
         public void SideFacingWorkshopRotatesItsActualHousingAndCachedPickBounds()

@@ -81,7 +81,10 @@ public sealed class VeylSurveyPlacementTests : IDisposable
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     var step = origin + new Vector3i(structure.Width / 2 + dx, burial - z, z);
-                    Assert.Equal(ShapeCode.Pack(BlockShape.Stairs, 2), server.World.GetShape(step));
+                    int expectedShape = Math.Abs(dx) <= 1
+                        ? ShapeCode.Pack(BlockShape.Ramp, 2)
+                        : ShapeCode.Pack(BlockShape.Stairs, 2);
+                    Assert.Equal(expectedShape, server.World.GetShape(step));
                     Assert.True(server.World.GetBlock(step + new Vector3i(0, 1, 0)).IsAir);
                     Assert.True(server.World.GetBlock(step + new Vector3i(0, 2, 0)).IsAir);
                 }

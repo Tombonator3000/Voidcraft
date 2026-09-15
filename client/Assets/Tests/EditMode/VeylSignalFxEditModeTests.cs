@@ -58,12 +58,20 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
-            Object.DestroyImmediate(_root);
-            _network.Dispose(); _sender.Dispose();
+            DisableFx();
+            if (_root != null) Object.DestroyImmediate(_root);
+            _network?.Dispose(); _sender?.Dispose();
         }
 
         private void SetGame(string property, object value) => typeof(GameBootstrap).GetProperty(property).SetValue(_game, value);
         private void Advance(float seconds) => typeof(VeylSignalFx).GetMethod("Advance", Private).Invoke(_fx, new object[] { seconds });
+        private void DisableFx()
+        {
+            if (_fx == null) return;
+            _fx.enabled = false;
+            // Runtime-only MonoBehaviour callbacks are not dispatched by an EditMode fixture.
+            typeof(VeylSignalFx).GetMethod("OnDisable", Private).Invoke(_fx, null);
+        }
         private MeshFilter Filter() => _root.GetComponentInChildren<MeshFilter>();
         private void Send(object message)
         {
@@ -203,7 +211,7 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             Send(Response(node)); Assert.NotNull(Filter());
             _sender.DisconnectClient(1); _sender.Poll(); _network.Poll();
             Assert.IsNull(Filter());
-            _fx.enabled = false;
+            DisableFx();
             Send(new VeylSignalResponse { EventId = "disabled-view", Nodes = new[] { node } });
             Assert.IsNull(Filter(), "Disabled views must unsubscribe from the live client.");
         }

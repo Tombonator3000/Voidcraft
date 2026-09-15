@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Serialization;
 using BlocksBeyondTheStars.Shared.Content;
 using BlocksBeyondTheStars.Shared.Geometry;
 using BlocksBeyondTheStars.Shared.Primitives;
@@ -21,6 +22,7 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         private GameObject _root;
         private PlayerController _player;
         private CharacterController _capsule;
+        private BlockTextureAtlas _atlas;
         private readonly List<Mesh> _meshes = new();
 
         [SetUp]
@@ -44,6 +46,13 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             Object.DestroyImmediate(_root);
             foreach (var mesh in _meshes) if (mesh != null) Object.DestroyImmediate(mesh);
             _meshes.Clear();
+            if (_atlas != null)
+            {
+                Object.DestroyImmediate(_atlas.Texture);
+                Object.DestroyImmediate(_atlas.NormalTexture);
+                Object.DestroyImmediate(_atlas.SurfaceTexture);
+                _atlas = null;
+            }
             Physics.SyncTransforms();
         }
 
@@ -280,6 +289,7 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             for (int z = 0; z < 6; z++) { chunk.Set(0, 0, z, block); chunk.SetShape(0, 0, z, panel); }
             var (render, collider) = ChunkMesher.Build(chunk, content,
                 (x, y, z) => x == 0 && y == 0 && z >= 0 && z < 6 ? block : BlockId.Air,
+                Atlas(content),
                 worldShape: (x, y, z) => x == 0 && y == 0 && z >= 0 && z < 6 ? panel : 0);
             _meshes.Add(render); _meshes.Add(collider);
             var edge = new GameObject("Authored quarter-height Panel edge");
@@ -362,7 +372,7 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
                     chunk.Set(local.X, local.Y, local.Z, cell.Value);
                     if (shapes.TryGetValue(cell.Key, out int shape)) chunk.SetShape(local.X, local.Y, local.Z, shape);
                 }
-                var (render, collider) = ChunkMesher.Build(chunk, content, Cell, worldShape: Shape);
+                var (render, collider) = ChunkMesher.Build(chunk, content, Cell, Atlas(content), worldShape: Shape);
                 _meshes.Add(render); _meshes.Add(collider);
                 var go = new GameObject($"ShipChunk {coord.X},{coord.Y},{coord.Z}");
                 go.transform.SetParent(ship.transform, false);
@@ -385,6 +395,22 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             _capsule.skinWidth = 0.03f; _capsule.stepOffset = 0.6f; _capsule.slopeLimit = 50f;
             _player.transform.position = new Vector3(0.51493406f, 59.03f, -2.8108604f);
             Physics.SyncTransforms();
+        }
+
+        private BlockTextureAtlas Atlas(GameContent content)
+        {
+            if (_atlas != null) return _atlas;
+            // Collider generation only needs a non-null atlas to select the same shaped-block path as
+            // GameBootstrap. Avoid constructing the 2048px runtime textures in EditMode: their temporary
+            // texture cleanup correctly uses Destroy in play mode, which Unity rejects in EditMode tests.
+#pragma warning disable SYSLIB0050
+            _atlas = (BlockTextureAtlas)FormatterServices.GetUninitializedObject(typeof(BlockTextureAtlas));
+#pragma warning restore SYSLIB0050
+            typeof(BlockTextureAtlas).GetField("_variants", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(_atlas, new Dictionary<ushort, ushort[]>());
+            typeof(BlockTextureAtlas).GetField("_capTiles", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(_atlas, new Dictionary<ushort, ushort>());
+            return _atlas;
         }
 
         private static Type Nested(string name) => typeof(PlayerController).Assembly.GetType("BlocksBeyondTheStars.Client.JourneyWalkPlanner+" + name);

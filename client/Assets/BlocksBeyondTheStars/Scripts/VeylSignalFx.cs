@@ -54,7 +54,7 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int ReducedId = Shader.PropertyToID("_ReducedEffects");
         private readonly HashSet<string> _seen = new();
         private readonly List<VeylSignalNode> _nodes = new();
-        private readonly MaterialPropertyBlock _properties = new();
+        private MaterialPropertyBlock _properties;
         private NetworkClient _network;
         private GameObject _effect;
         private Mesh _mesh;
@@ -165,6 +165,7 @@ namespace BlocksBeyondTheStars.Client
         private void ApplyPoseAndTime()
         {
             _effect.transform.position = Game.ScenePos(_origin.X, _origin.Y, _origin.Z);
+            _properties ??= new MaterialPropertyBlock();
             _properties.SetFloat(AgeId, _age);
             _properties.SetFloat(ReducedId, ReducedEffects ? 1f : 0f);
             _renderer.SetPropertyBlock(_properties);
@@ -238,7 +239,7 @@ namespace BlocksBeyondTheStars.Client
             _effect = null; _mesh = null; _material = null; _renderer = null; _colors = null;
             _nodes.Clear();
             _audio = null;
-            _properties.Clear();
+            _properties?.Clear();
         }
         private static void Release(Object value)
         {

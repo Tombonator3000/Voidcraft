@@ -76,12 +76,12 @@ namespace BlocksBeyondTheStars.Client
             {
                 Color baseColor = key switch
                 {
-                    "stone" => new Color(0.46f, 0.47f, 0.48f),
+                    "stone" => new Color(0.40f, 0.43f, 0.50f),
                     "granite" => new Color(0.46f, 0.39f, 0.35f),
                     "obsidian" => new Color(0.15f, 0.17f, 0.21f),
                     "rune_stone" => new Color(0.21f, 0.25f, 0.28f),
                     "deepslate" => new Color(0.25f, 0.27f, 0.30f),
-                    _ => new Color(0.28f, 0.29f, 0.32f),
+                    _ => new Color(0.22f, 0.25f, 0.31f),
                 };
                 float strata = Mathf.Sin((v * 7f + Noise(u * 3f, v * 2f, 4f) * 0.24f) * Mathf.PI);
                 float crack = Mathf.Abs(Mathf.Sin(u * 9f + v * 3f + broad * 1.5f));
@@ -111,12 +111,12 @@ namespace BlocksBeyondTheStars.Client
                 float vein = 1f - Transition(0.006f, 0.024f,
                     Mathf.Abs(v - 0.28f - u * 0.41f - broad * 0.035f));
                 s.Albedo = Color.Lerp(new Color(0.22f, 0.35f, 0.44f),
-                    crystal ? new Color(0.43f, 0.65f, 0.71f) : new Color(0.72f, 0.83f, 0.85f),
+                    crystal ? new Color(0.26f, 0.40f, 0.57f) : new Color(0.72f, 0.83f, 0.85f),
                     0.5f + broad * 0.23f + facet * 0.09f);
-                s.Albedo = Color.Lerp(s.Albedo, new Color(0.64f, 0.89f, 0.92f), vein * 0.65f);
+                s.Albedo = Color.Lerp(s.Albedo, new Color(0.42f, 0.70f, 0.84f), vein * 0.42f);
                 s.Height = 0.62f + broad * 0.025f - vein * 0.055f;
                 s.Roughness = 0.22f + broad * 0.13f;
-                s.Emission = crystal ? 0.04f + vein * 0.70f : 1f;
+                s.Emission = crystal ? 0.02f + vein * 0.24f : 1f;
                 return s;
             }
 

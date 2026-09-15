@@ -408,9 +408,12 @@ namespace BlocksBeyondTheStars.Client
             }
 
             if (_terrain && !phases[1].traversalVerified) _measurementFailure = "terrain_traversal_unverified";
+            bool sampledRenderScaleVerified = SampledRenderScaleVerified(phases);
             WriteResults(shell, phases);
             RestoreSettingsFile();
-            Quit(_terrain && !phases[1].traversalVerified ? 2 : 0);
+            int exitCode = !sampledRenderScaleVerified ? 6
+                : _terrain && !phases[1].traversalVerified ? 2 : 0;
+            Quit(exitCode);
         }
 
         private static string SettingsPath => Path.Combine(Application.persistentDataPath, "client_settings.json");
@@ -1082,9 +1085,15 @@ namespace BlocksBeyondTheStars.Client
             return sorted[i];
         }
 
+        private bool SampledRenderScaleVerified(List<PhaseResult> phases)
+            => _renderScaleSpec == null || phases.TrueForAll(phase => phase.renderScaleVerified);
+
         private void WriteResults(AppShell shell, List<PhaseResult> phases)
         {
             float measuredScale = CurrentRenderScale();
+            bool sampledRenderScaleVerified = SampledRenderScaleVerified(phases);
+            if (!sampledRenderScaleVerified)
+                _measurementFailure = "requested_render_scale_changed_during_sampling";
             // No sampling follows result writing. Verify restoration before serializing its outcome;
             // teardown repeats restoration defensively. External runners can verify the file hash after exit.
             RestoreRenderScale();
@@ -1142,6 +1151,7 @@ namespace BlocksBeyondTheStars.Client
                 readiness = _readiness.ToArray(),
                 measurementValid = phases.Count > 0 && phases[0].fixedIdleVerified && _readiness.TrueForAll(x => x.passed)
                     && (_renderScaleSpec == null || _renderScaleWasApplied && _renderScaleRestored)
+                    && sampledRenderScaleVerified
                     && (!_didBackup || _settingsBytesPreserved)
                     && (!_terrain || phases.Count > 1 && phases[1].traversalVerified),
                 measurementFailure = _measurementFailure,

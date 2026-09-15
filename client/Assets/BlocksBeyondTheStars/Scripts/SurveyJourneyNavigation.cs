@@ -7,30 +7,71 @@ namespace BlocksBeyondTheStars.Client
 {
     public sealed partial class SurveyJourneyProbe
     {
-        // Discover the entrance from replicated shaped cells around the observed surface inscription.
+        // Discover the entrance from replicated stair/ramp cells around the observed surface inscription.
         // No world-generation class, placement origin, saved position or hidden server state is consulted.
         private bool FindEntryStair(out Vector3Int cell)
         {
             cell = default;
             float best = float.PositiveInfinity;
+            Vector3Int bestRamp = default;
+            float bestRampScore = float.PositiveInfinity;
+            int observedShapes = 0, observedRamps = 0, standableRamps = 0, longRamps = 0;
+            string observedShapeCells = string.Empty;
             int floor = Mathf.FloorToInt(_player.transform.position.y);
-            for (int x = Mathf.FloorToInt(_rune.x) - 10; x <= Mathf.FloorToInt(_rune.x) + 10; x++)
-            for (int z = Mathf.FloorToInt(_rune.z) - 10; z <= Mathf.FloorToInt(_rune.z) + 10; z++)
+            const int entranceObservationRadius = 24;
+            for (int x = Mathf.FloorToInt(_rune.x) - entranceObservationRadius; x <= Mathf.FloorToInt(_rune.x) + entranceObservationRadius; x++)
+            for (int z = Mathf.FloorToInt(_rune.z) - entranceObservationRadius; z <= Mathf.FloorToInt(_rune.z) + entranceObservationRadius; z++)
             for (int y = floor - 2; y <= floor + 1; y++)
             {
                 var candidate = new Vector3Int(x, y, z);
-                if (!IsStair(candidate) || !StandOn(candidate, out var feet)) continue;
+                if (!IsDescentCell(candidate)) continue;
+                observedShapes++;
+                bool ramp = ShapeCode.ShapeOf(_game.World.GetShape(candidate.x, candidate.y, candidate.z)) == (int)BlockShape.Ramp;
+                if (ramp) observedRamps++;
+                if (observedShapes <= 24) observedShapeCells += $"|{candidate.x},{candidate.y},{candidate.z}:{_game.World.GetShape(candidate.x, candidate.y, candidate.z)}";
+                if (!StandOn(candidate, out var feet)) continue;
+                if (ramp) standableRamps++;
+                // The virgin-world access ribbon may contain one or two decorative transition steps near
+                // the signal. Prefer the authored vault mouth: it is the only observed stair/ramp chain that
+                // continues several rows toward the buried excavation. This is a read-only observation of
+                // replicated geometry, not a world-generation coordinate or a hidden position shortcut.
+                // The surface access ribbon can contain a few decorative transition steps. The
+                // authored vault mouth is the only observed chain that continues for a full descent;
+                // require enough measured continuation to avoid selecting the nearest false-positive.
+                if (CountLowerStairs(candidate, 8) < 8) continue;
+                if (ramp) longRamps++;
                 // Enter at the upper end, not through a trench wall half-way down the stair.
                 if (Mathf.Abs(feet.y - _player.transform.position.y) > 1.5f) continue;
                 float score = HorizontalDistance(feet, _player.transform.position) + 3f * Mathf.Abs(feet.y - _player.transform.position.y);
+                if (ramp && score < bestRampScore)
+                {
+                    bestRampScore = score;
+                    bestRamp = candidate;
+                }
+                // Prefer the continuous centre ramp when the observed structure exposes one. The
+                // surface ribbon is allowed as a fallback for older geometry without that ramp.
+                if (ramp) continue;
                 if (score >= best) continue;
                 best = score; cell = candidate;
             }
-            return !float.IsPositiveInfinity(best);
+            if (!float.IsPositiveInfinity(bestRampScore)) cell = bestRamp;
+            if (!_stairObservationLogged)
+            {
+                _stairObservationLogged = true;
+                Log("stair_observation", $"shapes={observedShapes};ramps={observedRamps};standable_ramps={standableRamps};long_ramps={longRamps};selected={cell.x},{cell.y},{cell.z};cells={observedShapeCells}");
+            }
+            return !float.IsPositiveInfinity(best) || !float.IsPositiveInfinity(bestRampScore);
         }
 
-        private bool IsStair(Vector3Int p) => _game.World.TryGetBlock(p.x, p.y, p.z, out var b) && !b.IsAir
-            && ShapeCode.ShapeOf(_game.World.GetShape(p.x, p.y, p.z)) == (int)BlockShape.Stairs;
+        private int CountLowerStairs(Vector3Int current, int limit)
+        {
+            int count = 0;
+            for (; count < limit && FindLowerStair(current, out var next); count++) current = next;
+            return count;
+        }
+
+        private bool IsDescentCell(Vector3Int p) => _game.World.TryGetBlock(p.x, p.y, p.z, out var b) && !b.IsAir
+            && ShapeCode.ShapeOf(_game.World.GetShape(p.x, p.y, p.z)) is (int)BlockShape.Stairs or (int)BlockShape.Ramp;
 
         private bool StandOn(Vector3Int cell, out Vector3 feet)
             => JourneyWalkPlanner.TryFloor(_player, _capsule, (Vector3)cell + new Vector3(0.5f, 1f, 0.5f), out feet)
@@ -48,7 +89,7 @@ namespace BlocksBeyondTheStars.Client
             {
                 if (x == 0 && z == 0) continue;
                 var candidate = current + new Vector3Int(x, -1, z);
-                if (!IsStair(candidate) || !StandOn(candidate, out var feet)) continue;
+                if (!IsDescentCell(candidate) || !StandOn(candidate, out var feet)) continue;
                 float score = HorizontalDistance(feet, destination) + (x != 0 && z != 0 ? 0.3f : 0f);
                 if (score >= best) continue;
                 best = score; cell = candidate;

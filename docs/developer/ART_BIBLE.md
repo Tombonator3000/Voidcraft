@@ -105,8 +105,9 @@ system (`BlockTextureAtlas.VariantKeys` whitelist is natural blocks only).
 
 ## 6. Light & post
 
-- ACES tonemapping; current candidate bloom threshold 1.15 / intensity 0.24 / scatter 0.45 and base
-  vignette 0.16 (`UrpScenePost`). These values require runtime comparison, not approval by inspection alone.
+- ACES tonemapping; the 2026-09-15 candidate uses bloom threshold 1.20 / intensity 0.20 / scatter 0.40
+  and base vignette 0.16 (`UrpScenePost`) to keep lamp cores selective while retaining amber task light.
+  These values require runtime comparison, not approval by inspection alone.
 - Equipment has independent finish properties and follows scene sun/shadows, cabin fill and the headlamp.
   Its palette and mesh data are shared, with narrow signal faces in a separate cached draw.
 - The visor UI camera uses the renderer without SSAO and requests no depth/opaque copies, scene shadows

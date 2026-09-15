@@ -41,7 +41,7 @@ namespace BlocksBeyondTheStars.Client
 
         /// <summary>Global scene brightness (1.0 = neutral). Drives the colour grade's post-exposure so every world
         /// brightens/darkens uniformly. Wired from WorldRig; the settings slider pushes it live via <see cref="SetBrightness"/>.</summary>
-        public float Brightness = 1.15f;
+        public float Brightness = 1.08f;
 
         private ColorAdjustments _grade;
         private ColorLookup _lut;
@@ -90,9 +90,9 @@ namespace BlocksBeyondTheStars.Client
             }
             else
             {
-                bloom.threshold.Override(1.15f);
-                bloom.intensity.Override(0.24f);
-                bloom.scatter.Override(0.45f);
+                bloom.threshold.Override(1.2f);
+                bloom.intensity.Override(0.20f);
+                bloom.scatter.Override(0.40f);
             }
 
             _vignette = profile.Add<Vignette>(true);
@@ -378,6 +378,7 @@ namespace BlocksBeyondTheStars.Client
             switch ((biome ?? string.Empty).ToLowerInvariant())
             {
                 case "": return "";
+                case "rocky": case "varied": case "highland": case "skylands": return "rocky";
                 case "jungle": case "forest": return "jungle";
                 case "desert": return "desert";
                 case "ice": case "frozen": return "ice";
@@ -392,6 +393,7 @@ namespace BlocksBeyondTheStars.Client
         {
             switch (key)
             {
+                case "rocky":    return new Mood(1.08f, 0.90f, 1.00f, new Vector3(0.94f, 0.90f, 0.86f), new Vector3(1.08f, 1.01f, 0.90f));
                 case "jungle":  return new Mood(1.05f, 1.12f, 1.00f, new Vector3(0.95f, 1.00f, 1.00f), new Vector3(1.02f, 1.05f, 0.95f));
                 case "desert":  return new Mood(1.12f, 0.98f, 1.01f, new Vector3(1.00f, 0.98f, 0.92f), new Vector3(1.08f, 1.02f, 0.88f));
                 case "ice":     return new Mood(1.10f, 0.94f, 1.00f, new Vector3(0.92f, 0.99f, 1.10f), new Vector3(0.98f, 1.01f, 1.06f));

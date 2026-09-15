@@ -425,14 +425,15 @@ namespace BlocksBeyondTheStars.Client
             public GameBootstrap Game;
             public Camera ViewCamera;
             private bool _built;
+            private GameObject _veylDiscovery;
 
             private void Update()
             {
                 var cam = ViewCamera != null ? ViewCamera : Camera.main;
                 bool near = cam != null && (cam.transform.position - transform.position).sqrMagnitude < 25f;
-                if (near && !_built && Game?.StarMap?.Systems != null)
+                if (near)
                 {
-                    Build();
+                    RefreshMap();
                 }
 
                 Vector3 target = near ? Vector3.one : Vector3.zero;
@@ -441,6 +442,53 @@ namespace BlocksBeyondTheStars.Client
                 {
                     transform.Rotate(0f, 8f * Time.deltaTime, 0f, Space.Self);
                 }
+            }
+
+            private void RefreshMap()
+            {
+                if (!_built && Game?.StarMap?.Systems != null)
+                {
+                    Build();
+                }
+
+                if (!_built)
+                {
+                    return;
+                }
+
+                // Survey completion is server-authoritative and persisted in PlayerStateUpdate. Keep the
+                // signature separate from the celestial bodies: the completion flag has no honest star/body
+                // coordinate, so the map gains a durable discovery badge instead of inventing a location.
+                bool visible = Game != null && Game.VeylSurveyComplete;
+                if (visible && _veylDiscovery == null)
+                {
+                    _veylDiscovery = BuildVeylDiscovery(transform);
+                }
+
+                if (_veylDiscovery != null && _veylDiscovery.activeSelf != visible)
+                {
+                    _veylDiscovery.SetActive(visible);
+                }
+            }
+
+            private static GameObject BuildVeylDiscovery(Transform parent)
+            {
+                return EquipmentGeometry.Create(parent, "Veyl discovery signal", "station:holo:veyl-discovery", Cyan, b =>
+                {
+                    // Repeat the physical specimen's upright Veyl stroke/crossbar as a small two-sided
+                    // holographic signature above the system. The crystal anchor keeps it legible while the
+                    // projection rotates, and the shared equipment lease releases it with the cockpit fixture.
+                    var center = new Vector3(0f, 0.315f, 0f);
+                    b.Barrel(center, 0.017f, 0.014f, 0.028f, EquipmentGeometry.Finish.Crystal);
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        var face = center + Vector3.forward * (side * 0.015f);
+                        var rotation = side < 0 ? Quaternion.identity : Quaternion.Euler(0f, 180f, 0f);
+                        b.Signal(face, new Vector2(0.006f, 0.090f), Cyan, rotation);
+                        b.Signal(face + new Vector3(0.015f, -0.020f, 0f), new Vector2(0.038f, 0.006f), Cyan, rotation);
+                        b.Signal(face + new Vector3(0f, -0.058f, 0f), new Vector2(0.060f, 0.005f), Amber, rotation);
+                    }
+                });
             }
 
             private void Build()

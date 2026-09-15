@@ -45,7 +45,13 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
         [Test]
         public void SaveThenLoad_RoundTripsAndWritesTokenBackup()
         {
-            var settings = new ClientSettings { PlayerName = "Justus", PlayerToken = "token-one", MouseSensitivity = 3.5f };
+            var settings = new ClientSettings
+            {
+                PlayerName = "Justus",
+                PlayerToken = "token-one",
+                MouseSensitivity = 3.5f,
+                ReducedEffects = true,
+            };
             settings.Save();
 
             var loaded = ClientSettings.Load();
@@ -53,10 +59,31 @@ namespace BlocksBeyondTheStars.Client.Tests.EditMode
             Assert.AreEqual("Justus", loaded.PlayerName);
             Assert.AreEqual("token-one", loaded.PlayerToken);
             Assert.AreEqual(3.5f, loaded.MouseSensitivity);
+            Assert.IsTrue(loaded.ReducedEffects);
             Assert.IsTrue(File.Exists(TokenPath(_dir)), "Save must mirror the token into its own backup file");
             Assert.AreEqual("token-one", File.ReadAllText(TokenPath(_dir)).Trim());
             Assert.IsFalse(File.Exists(SettingsPath(_dir) + ".tmp"), "the atomic-write temp file must not linger");
             Assert.AreEqual("", ClientSettings.LoadNoticeKey, "a clean load must not raise a recovery notice");
+        }
+
+        [Test]
+        public void ApplyAccessibility_UpdatesReducedMotionBothWays()
+        {
+            bool previous = UiKit.ReducedMotion;
+            try
+            {
+                var settings = new ClientSettings { ReducedEffects = true };
+                settings.ApplyAccessibility();
+                Assert.IsTrue(UiKit.ReducedMotion);
+
+                settings.ReducedEffects = false;
+                settings.ApplyAccessibility();
+                Assert.IsFalse(UiKit.ReducedMotion);
+            }
+            finally
+            {
+                UiKit.ReducedMotion = previous;
+            }
         }
 
         [Test]

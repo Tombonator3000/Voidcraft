@@ -148,12 +148,17 @@ public sealed class VeylSurveyTests : IDisposable
         Assert.NotEqual(0, vault.Get(12, 26, 40));
         Assert.Equal(0, vault.Get(12, 27, 40));
         Assert.Equal(0, VeylSurveyGenerator.MinimumCarveHeight(2, 12, 40));
+        Assert.Equal(VeylSurveyGenerator.VaultBurialDepth + 7,
+            VeylSurveyGenerator.MinimumCarveHeight(VeylSurveyGenerator.LatestVersion, 12, 0));
         Assert.Equal(8, VeylSurveyGenerator.MinimumCarveHeight(2, 4, 27));
         for (int z = 0; z <= 21; z++)
             for (int x = 11; x <= 13; x++)
             {
                 int y = 26 - z;
-                Assert.Equal(ShapeCode.Pack(BlockShape.Stairs, 2), vault.GetShape(x, y, z));
+                int expectedShape = Math.Abs(x - 12) <= 1
+                    ? ShapeCode.Pack(BlockShape.Ramp, 2)
+                    : ShapeCode.Pack(BlockShape.Stairs, 2);
+                Assert.Equal(expectedShape, vault.GetShape(x, y, z));
                 for (int head = 1; head <= 3; head++) Assert.Equal(0, vault.Get(x, y + head, z));
             }
         for (int z = 22; z < 46; z++)
@@ -193,6 +198,9 @@ public sealed class VeylSurveyTests : IDisposable
         var route = new HashSet<(int X, int Z)>();
         for (int z = 28; z <= 45; z++)
             for (int x = 7; x <= 8; x++) route.Add((x, z));
+        // The west shoulder is the capsule-width return landing beside the intentionally broken east edge.
+        for (int z = 28; z <= 45; z++)
+            for (int x = 9; x <= 10; x++) route.Add((x, z));
         foreach (int z in new[] { 28, 29, 44, 45 })
             for (int x = 7; x <= 13; x++) route.Add((x, z));
         foreach (var (x, z) in route)

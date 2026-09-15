@@ -259,6 +259,8 @@ namespace BlocksBeyondTheStars.Client
         public string PortalAccountName = "";
 
         // Accessibility
+        /// <summary>Replace traveling/full-screen bursts and dense ambient motion with gentler stationary
+        /// presentation while retaining the underlying information and audio cues.</summary>
         public bool ReducedEffects = false;
 
         /// <summary>Show controls for the held tool and only currently relevant resource gauges.</summary>
@@ -745,7 +747,7 @@ namespace BlocksBeyondTheStars.Client
         {
             ApplyWindowMode();
             AudioListener.volume = Mathf.Clamp01(MasterVolume); // master bus (M26)
-            UiKit.ReducedMotion = ReducedEffects; // UI transitions snap instantly for reduced-effects users
+            ApplyAccessibility();
             UiKit.SetUserScale(UiScale);          // HUD canvases + the IMGUI leftovers follow the UI-scale setting
 
             int levels = QualitySettings.names != null ? QualitySettings.names.Length : 0;
@@ -807,6 +809,14 @@ namespace BlocksBeyondTheStars.Client
             }
 
             ApplyCameraLook();
+        }
+
+        /// <summary>Applies the shared UI accessibility state without reapplying display or quality settings.
+        /// The settings UI uses this so Reduced effects takes effect immediately while its normal Back action
+        /// remains responsible for persisting the preference.</summary>
+        public void ApplyAccessibility()
+        {
+            UiKit.ReducedMotion = ReducedEffects;
         }
 
         /// <summary>The active gameplay camera's URP data, set by <see cref="WorldRig"/> so graphics changes made in

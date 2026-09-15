@@ -11,8 +11,13 @@ namespace BlocksBeyondTheStars.Client
     internal static class JourneyWalkPlanner
     {
         private const float Cell = 0.75f;
-        private const int Radius = 24; // 18 m: inspect a detour beyond the old 6.75 m greedy window
-        private const int NodeBudget = 2048;
+        // The Veyl vault deliberately includes a broken bridge and a side return. Keep the search
+        // bounded, but allow a short return waypoint to route around a local terrain/mesh pocket too;
+        // distance alone is not evidence that the direct corridor is the only observed option.
+        private const int LocalRadius = 24;  // 18 m: ordinary step/door navigation plus bounded local detours
+        private const int DetourRadius = 48; // 36 m: controlled detour around the broken bridge
+        private const int LocalNodeBudget = 4096;
+        private const int DetourNodeBudget = 4096;
         private static readonly RaycastHit[] FloorHits = new RaycastHit[24];
         private static readonly RaycastHit[] SweepHits = new RaycastHit[24];
         private static readonly Collider[] Overlaps = new Collider[32];
@@ -116,6 +121,7 @@ namespace BlocksBeyondTheStars.Client
             private readonly Vector3 _origin, _goal;
             private readonly bool _matchHeight;
             private readonly float _reach;
+            private readonly int _radius;
             private readonly int _nodeBudget;
             private readonly Dictionary<Vector2Int, Node> _nodes = new();
             private readonly List<Node> _open = new();
@@ -125,10 +131,14 @@ namespace BlocksBeyondTheStars.Client
             public bool Done { get; private set; }
 
             public Search(PlayerController player, CharacterController capsule, Vector3 goal,
-                float reach, bool matchHeight, Memory memory, int nodeBudget = NodeBudget)
+                float reach, bool matchHeight, Memory memory, int nodeBudget = -1)
             {
                 _player = player; _capsule = capsule; _goal = goal; _origin = player.transform.position;
-                _reach = reach; _matchHeight = matchHeight; _memory = memory; _nodeBudget = nodeBudget;
+                _reach = reach; _matchHeight = matchHeight; _memory = memory;
+                float horizontalGoalDistance = new Vector2(_origin.x - goal.x, _origin.z - goal.z).magnitude;
+                bool needsDetour = horizontalGoalDistance > 12f;
+                _radius = needsDetour ? DetourRadius : LocalRadius;
+                _nodeBudget = nodeBudget > 0 ? nodeBudget : needsDetour ? DetourNodeBudget : LocalNodeBudget;
                 Diagnostics = new Report { origin = _origin, goal = goal, walkedForGoal = memory.Walked, planNumber = memory.Plans + 1 };
                 if (memory.Exhausted) { Complete("goal_exploration_budget_exhausted"); return; }
                 memory.BeginPlan();
@@ -153,14 +163,14 @@ namespace BlocksBeyondTheStars.Client
                     current.Closed = true; expanded++; Diagnostics.visitedNodes++;
                     if (Arrived(current.Position, _goal, _reach, _matchHeight))
                     { UseRoute(current, "goal_route"); return; }
-                    if (Mathf.Abs(current.Key.x) == Radius || Mathf.Abs(current.Key.y) == Radius)
+                    if (Mathf.Abs(current.Key.x) == _radius || Mathf.Abs(current.Key.y) == _radius)
                     { _boundary.Add(current); Diagnostics.boundaryNodes++; }
                     for (int x = -1; x <= 1; x++)
                     for (int z = -1; z <= 1; z++)
                     {
                         if (x == 0 && z == 0) continue;
                         var key = current.Key + new Vector2Int(x, z);
-                        if (Mathf.Abs(key.x) > Radius || Mathf.Abs(key.y) > Radius) continue;
+                        if (Mathf.Abs(key.x) > _radius || Mathf.Abs(key.y) > _radius) continue;
                         if (_nodes.TryGetValue(key, out var existing) && existing.Closed) continue;
                         Vector3 sample = new(_origin.x + key.x * Cell, current.Position.y, _origin.z + key.y * Cell);
                         if (!TryFloor(_player, _capsule, sample, out var next, Diagnostics)

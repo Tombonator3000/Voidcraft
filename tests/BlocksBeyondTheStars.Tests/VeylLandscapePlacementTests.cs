@@ -61,7 +61,10 @@ public sealed class VeylLandscapePlacementTests : IDisposable
                 && (x < record.X - 5 || x > record.X + structure.Width + 4 || z > record.Z + structure.Length + 4);
         }
         return coords.SelectMany(c => repo.LoadChunkEdits(server.World.LocationId, c))
-            .Where(e => Landscape(e.WorldPosition)).OrderBy(e => e.WorldPosition.X).ThenBy(e => e.WorldPosition.Z)
+            // The travel ribbon also clears headroom through a natural wall. This helper describes
+            // authored basalt columns; air-clearance edits are validated by the runtime journey.
+            .Where(e => Landscape(e.WorldPosition) && e.Block == _content.GetBlock("basalt")!.NumericId.Value)
+            .OrderBy(e => e.WorldPosition.X).ThenBy(e => e.WorldPosition.Z)
             .ThenBy(e => e.WorldPosition.Y).ToList();
     }
 
@@ -103,13 +106,15 @@ public sealed class VeylLandscapePlacementTests : IDisposable
                 foreach (var edit in column)
                 {
                     Assert.Equal(basalt.Value, edit.Block);
-                    Assert.Equal(0, edit.Shape);
+                    // Landscape prisms remain cubes; the long-distance access ribbon may use an authored
+                    // staircase cell so ordinary character-controller traversal can climb it.
+                    Assert.True(edit.Shape == 0 || ShapeCode.ShapeOf(edit.Shape) == (int)BlockShape.Stairs);
                     Assert.Equal(basalt, server.World.GetBlock(edit.WorldPosition));
                     Assert.True(server.OverlapsAnySettlement(edit.WorldPosition.X, edit.WorldPosition.Z), "Every actual column is reserved for subsequent content searches.");
                 }
             }
-            Assert.True(bounds.MaxX - bounds.MinX <= 80);
-            Assert.True(bounds.MaxZ - bounds.MinZ <= 150); // includes the existing bounded north approach
+            Assert.True(bounds.MaxX - bounds.MinX <= 160); // includes the bounded pad-to-site access ribbon
+            Assert.True(bounds.MaxZ - bounds.MinZ <= 160); // includes the existing bounded north approach
             var site = server.VeylSurveyForTest()!.Value;
             Assert.True(server.World.GetBlock(site.Surface + new Vector3i(0, 0, -1)).IsAir);
             Assert.True(server.World.GetBlock(site.Surface + new Vector3i(0, 1, -1)).IsAir);
@@ -118,7 +123,10 @@ public sealed class VeylLandscapePlacementTests : IDisposable
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     var step = new Vector3i(record.X + generated.Width / 2 + dx, surface - z, record.Z + z);
-                    Assert.Equal(ShapeCode.Pack(BlockShape.Stairs, 2), server.World.GetShape(step));
+                    int expectedShape = Math.Abs(dx) <= 1
+                        ? ShapeCode.Pack(BlockShape.Ramp, 2)
+                        : ShapeCode.Pack(BlockShape.Stairs, 2);
+                    Assert.Equal(expectedShape, server.World.GetShape(step));
                     Assert.True(server.World.GetBlock(step + new Vector3i(0, 1, 0)).IsAir);
                     Assert.True(server.World.GetBlock(step + new Vector3i(0, 2, 0)).IsAir);
                 }

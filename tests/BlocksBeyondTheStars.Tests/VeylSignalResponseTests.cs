@@ -67,16 +67,19 @@ public sealed class VeylSignalResponseTests : IDisposable
         public void Dispose() { }
     }
 
-    private static void StandAt(PlayerSession player, Vector3i core)
+    private static void StandAt(SvGameServer server, PlayerSession player, Vector3i core)
     {
         player.State.AboardShip = false;
-        player.State.Position = new Vector3f(core.X + 0.5f, core.Y, core.Z - 2.5f);
+        player.State.Position = new Vector3f(
+            (float)WorldConstants.WrapX(core.X + 0.5, server.World.Circumference),
+            core.Y,
+            (float)WorldConstants.WrapZ(core.Z - 2.5, server.World.Circumference));
     }
 
     private static void PrepareRepair(SvGameServer server, PlayerSession player)
     {
         var site = server.VeylSurveyForTest()!.Value;
-        StandAt(player, site.Contact);
+        StandAt(server, player, site.Contact);
         for (int z = -2; z <= -1; z++)
             for (int y = 0; y <= 1; y++)
             {
@@ -86,7 +89,7 @@ public sealed class VeylSignalResponseTests : IDisposable
             }
         server.MineBlock(player.State.PlayerId, site.Socket.X, site.Socket.Y, site.Socket.Z);
         Assert.True(server.World.GetBlock(site.Socket).IsAir);
-        server.ScanSubject(player.State.PlayerId, "block", "rune_stone");
+        Assert.Equal("monument", server.ScanSubject(player.State.PlayerId, "block", "rune_stone").Kind);
         player.State.Inventory.Add("stone", 2, 1024);
         server.ShapeCraft(player.State.PlayerId, "stone", (int)BlockShape.Ramp);
     }
@@ -138,7 +141,7 @@ public sealed class VeylSignalResponseTests : IDisposable
                 Assert.InRange(ordered.FindIndex(m => m is BlockChanged b && b.Y == site.Contact.Y && b.Glow == 0x66ECFF), 0, pulse - 1);
                 Assert.False(alice.State.Inventory.Has("terrain_scanner", 1)); // Still earned only on homecoming.
                 transport.Sent.Clear();
-                StandAt(bob, site.Contact);
+                StandAt(server, bob, site.Contact);
                 server.ScanSubject("Bob", "block", "rune_stone");
                 server.ScanSubject("Bob", "block", "rune_stone");
                 server.ScanSubject("Alice", "block", "rune_stone");
@@ -155,7 +158,7 @@ public sealed class VeylSignalResponseTests : IDisposable
             try
             {
                 var visitor = reloaded.AddLocalPlayer("Later visitor");
-                StandAt(visitor, reloaded.VeylSurveyForTest()!.Value.Contact);
+                StandAt(reloaded, visitor, reloaded.VeylSurveyForTest()!.Value.Contact);
                 reloaded.ScanSubject(visitor.State.PlayerId, "block", "rune_stone");
                 Assert.Contains("survey:veyl:response", visitor.State.Milestones);
                 Assert.DoesNotContain(transport.Sent, m => m.Message is VeylSignalResponse);
@@ -279,6 +282,13 @@ public sealed class VeylSignalResponseTests : IDisposable
             try
             {
                 var player = loaded.AddLocalPlayer("Wrapped explorer");
+                var site = loaded.VeylSurveyForTest()!.Value;
+                player.State.AboardShip = false;
+                player.State.Position = new Vector3f(
+                    (float)WorldConstants.WrapX(site.Contact.X + 0.5, loaded.World.Circumference),
+                    site.Contact.Y,
+                    (float)WorldConstants.WrapZ(site.Contact.Z + 64.5, loaded.World.Circumference));
+                Assert.Equal("block", loaded.ScanSubject(player.State.PlayerId, "block", "rune_stone").Kind);
                 PrepareRepair(loaded, player);
                 transport.Sent.Clear();
                 Repair(loaded, player);
@@ -293,6 +303,35 @@ public sealed class VeylSignalResponseTests : IDisposable
                 Assert.Equal(version, Assert.Single(loaded.PlacementRecordsForTest.Where(r => r.Kind == "veyl_survey")).GeometryVersion);
             }
             finally { loaded.Stop(); }
+        }
+    }
+
+    [Fact]
+    public void AuthoritativeMineReach_UsesLatitudeSeam_AndRejectsDistantTargets()
+    {
+        var transport = new RecordingTransport();
+        var server = Start(out var repo, transport, story: false);
+        using (repo)
+        {
+            try
+            {
+                var player = server.AddLocalPlayer("Seam miner");
+                int halfPeriod = WorldConstants.LatitudePeriodFor(server.World.Circumference) / 2;
+                player.State.AboardShip = false;
+                player.State.Position = new Vector3f(100.5f, 40, halfPeriod - 1.5f);
+                var near = new Vector3i(100, 40, -halfPeriod);
+                var distant = new Vector3i(100, 40, -halfPeriod + 64);
+                var stone = _content.GetBlock("stone")!.NumericId;
+                server.World.SetBlock(near, stone);
+                server.World.SetBlock(distant, stone);
+
+                server.MineBlock(player.State.PlayerId, near.X, near.Y, near.Z);
+                server.MineBlock(player.State.PlayerId, distant.X, distant.Y, distant.Z);
+
+                Assert.True(server.World.GetBlock(near).IsAir);
+                Assert.Equal(stone, server.World.GetBlock(distant));
+            }
+            finally { server.Stop(); }
         }
     }
 
