@@ -70,6 +70,63 @@ namespace BlocksBeyondTheStars.Client
         private static readonly IInputSource _pad = new GamepadInputSource();
         private static readonly IInputSource _touch = new TouchInputSource();
 
+        // Inert during ordinary play. Explicit journey/performance runs each acquire one exclusive owner.
+        // Ordinary controllers still consume this interface; concurrent native sources cannot contaminate evidence.
+        private static IInputSource _automation;
+        private static bool _exclusiveVerificationInput;
+        public static bool AttachVerificationInput(IInputSource source)
+        {
+            bool allowed = Application.isEditor || System.Array.Exists(System.Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-verifySurveyJourney", System.StringComparison.Ordinal));
+            if (!allowed || source == null || _automation != null) return false;
+            _automation = source;
+            _exclusiveVerificationInput = true;
+            return true;
+        }
+
+        /// <summary>Own the InputMap gameplay controls only in an explicitly requested performance process. This
+        /// excludes native input and the legacy additive ScriptedMove path from a measured idle window.</summary>
+        public static bool AttachPerformanceInput(IInputSource source)
+        {
+            bool allowed = Application.isEditor || System.Array.Exists(System.Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-perfProbe", System.StringComparison.OrdinalIgnoreCase));
+            if (!allowed || source == null || _automation != null) return false;
+            _automation = source;
+            _exclusiveVerificationInput = true;
+            return true;
+        }
+
+        /// <summary>Keep scripted still captures free of concurrent gameplay input. This capability is
+        /// unavailable in an ordinary player process; Escape remains a native capture-cancel action.</summary>
+        public static bool AttachCaptureInput(IInputSource source)
+        {
+            bool allowed = Application.isEditor || System.Array.Exists(System.Environment.GetCommandLineArgs(),
+                arg => string.Equals(arg, "-captureShots", System.StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(arg, "-captureCredits", System.StringComparison.OrdinalIgnoreCase));
+            if (!allowed || source == null || _automation != null) return false;
+            _automation = source;
+            _exclusiveVerificationInput = true;
+            return true;
+        }
+
+        public static bool OwnsVerificationInput(IInputSource source)
+            => _exclusiveVerificationInput && object.ReferenceEquals(_automation, source);
+
+        public static void DetachVerificationInput(IInputSource source)
+        {
+            if (!object.ReferenceEquals(_automation, source)) return;
+            _automation = null;
+            _exclusiveVerificationInput = false;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetVerificationInput()
+        {
+            _automation = null;
+            _exclusiveVerificationInput = false;
+            ScriptedMove = Vector2.zero;
+        }
+
         private static int _deviceFrame = -1;
         private static InputDeviceKind _activeDevice = InputDeviceKind.KeyboardMouse;
 
@@ -79,6 +136,7 @@ namespace BlocksBeyondTheStars.Client
         {
             get
             {
+                if (_exclusiveVerificationInput) return _automation.Kind;
                 if (Time.frameCount != _deviceFrame)
                 {
                     _deviceFrame = Time.frameCount;
@@ -178,9 +236,9 @@ namespace BlocksBeyondTheStars.Client
 
         // Discrete rebindable actions — combined across all backends so a pad button, the touch USE button, or
         // the bound key all fire the action. The keyboard resolution is unchanged (DesktopInputSource calls Key).
-        public static bool Down(InputAction action) => _desktop.ActionDown(action) || _pad.ActionDown(action) || _touch.ActionDown(action);
-        public static bool Held(InputAction action) => _desktop.ActionHeld(action) || _pad.ActionHeld(action) || _touch.ActionHeld(action);
-        public static bool Up(InputAction action) => _desktop.ActionUp(action) || _pad.ActionUp(action) || _touch.ActionUp(action);
+        public static bool Down(InputAction action) => _exclusiveVerificationInput ? _automation.ActionDown(action) : _desktop.ActionDown(action) || _pad.ActionDown(action) || _touch.ActionDown(action) || (_automation?.ActionDown(action) ?? false);
+        public static bool Held(InputAction action) => _exclusiveVerificationInput ? _automation.ActionHeld(action) : _desktop.ActionHeld(action) || _pad.ActionHeld(action) || _touch.ActionHeld(action) || (_automation?.ActionHeld(action) ?? false);
+        public static bool Up(InputAction action) => _exclusiveVerificationInput ? _automation.ActionUp(action) : _desktop.ActionUp(action) || _pad.ActionUp(action) || _touch.ActionUp(action) || (_automation?.ActionUp(action) ?? false);
 
         // ---- Continuous locomotion / camera / interaction core -------------------------------------------
         // Each merges the backends. Movement + look are additive (mouse delta + stick delta + touch); the
@@ -193,21 +251,22 @@ namespace BlocksBeyondTheStars.Client
         public static Vector2 ScriptedMove;
 
         /// <summary>Strafe axis, −1..1 — replaces <c>Input.GetAxis("Horizontal")</c>.</summary>
-        public static float MoveX() => Mathf.Clamp(_desktop.MoveX() + _pad.MoveX() + _touch.MoveX() + ScriptedMove.x, -1f, 1f);
+        public static float MoveX() => _exclusiveVerificationInput ? Mathf.Clamp(_automation.MoveX(), -1f, 1f) : Mathf.Clamp(_desktop.MoveX() + _pad.MoveX() + _touch.MoveX() + ScriptedMove.x + (_automation?.MoveX() ?? 0f), -1f, 1f);
 
         /// <summary>Forward axis, −1..1 — replaces <c>Input.GetAxis("Vertical")</c>.</summary>
-        public static float MoveY() => Mathf.Clamp(_desktop.MoveY() + _pad.MoveY() + _touch.MoveY() + ScriptedMove.y, -1f, 1f);
+        public static float MoveY() => _exclusiveVerificationInput ? Mathf.Clamp(_automation.MoveY(), -1f, 1f) : Mathf.Clamp(_desktop.MoveY() + _pad.MoveY() + _touch.MoveY() + ScriptedMove.y + (_automation?.MoveY() ?? 0f), -1f, 1f);
 
         /// <summary>Yaw look delta (caller still multiplies by sensitivity) — replaces <c>GetAxis("Mouse X")</c>.</summary>
-        public static float LookX() => _desktop.LookX() + _pad.LookX() + _touch.LookX();
+        public static float LookX() => _exclusiveVerificationInput ? _automation.LookX() : _desktop.LookX() + _pad.LookX() + _touch.LookX() + (_automation?.LookX() ?? 0f);
 
         /// <summary>Pitch look delta (caller still multiplies by sensitivity) — replaces <c>GetAxis("Mouse Y")</c>.</summary>
-        public static float LookY() => _desktop.LookY() + _pad.LookY() + _touch.LookY();
+        public static float LookY() => _exclusiveVerificationInput ? _automation.LookY() : _desktop.LookY() + _pad.LookY() + _touch.LookY() + (_automation?.LookY() ?? 0f);
 
         /// <summary>Hotbar scroll: &gt;0 = previous slot, &lt;0 = next — replaces <c>GetAxis("Mouse ScrollWheel")</c>.
         /// Mouse wheel takes precedence; the pad d-pad / touch ◄► buttons fill in when the wheel is idle.</summary>
         public static float HotbarScroll()
         {
+            if (_exclusiveVerificationInput) return _automation.HotbarScroll();
             float d = _desktop.HotbarScroll();
             if (Mathf.Abs(d) > 0.0001f)
             {
@@ -215,22 +274,27 @@ namespace BlocksBeyondTheStars.Client
             }
 
             float p = _pad.HotbarScroll();
-            return Mathf.Abs(p) > 0.0001f ? p : _touch.HotbarScroll();
+            if (Mathf.Abs(p) > 0.0001f) return p;
+            float t = _touch.HotbarScroll();
+            return Mathf.Abs(t) > 0.0001f ? t : _automation?.HotbarScroll() ?? 0f;
         }
 
-        public static bool JumpHeld() => _desktop.JumpHeld() || _pad.JumpHeld() || _touch.JumpHeld();
-        public static bool JumpDown() => _desktop.JumpDown() || _pad.JumpDown() || _touch.JumpDown();
-        public static bool CrouchHeld() => _desktop.CrouchHeld() || _pad.CrouchHeld() || _touch.CrouchHeld();
-        public static bool PrimaryDown() => _desktop.PrimaryDown() || _pad.PrimaryDown() || _touch.PrimaryDown();
-        public static bool PrimaryHeld() => _desktop.PrimaryHeld() || _pad.PrimaryHeld() || _touch.PrimaryHeld();
-        public static bool SecondaryDown() => _desktop.SecondaryDown() || _pad.SecondaryDown() || _touch.SecondaryDown();
+        public static bool JumpHeld() => _exclusiveVerificationInput ? _automation.JumpHeld() : _desktop.JumpHeld() || _pad.JumpHeld() || _touch.JumpHeld() || (_automation?.JumpHeld() ?? false);
+        public static bool JumpDown() => _exclusiveVerificationInput ? _automation.JumpDown() : _desktop.JumpDown() || _pad.JumpDown() || _touch.JumpDown() || (_automation?.JumpDown() ?? false);
+        public static bool CrouchHeld() => _exclusiveVerificationInput ? _automation.CrouchHeld() : _desktop.CrouchHeld() || _pad.CrouchHeld() || _touch.CrouchHeld() || (_automation?.CrouchHeld() ?? false);
+        public static bool PrimaryDown() => _exclusiveVerificationInput ? _automation.PrimaryDown() : _desktop.PrimaryDown() || _pad.PrimaryDown() || _touch.PrimaryDown() || (_automation?.PrimaryDown() ?? false);
+        public static bool PrimaryHeld() => _exclusiveVerificationInput ? _automation.PrimaryHeld() : _desktop.PrimaryHeld() || _pad.PrimaryHeld() || _touch.PrimaryHeld() || (_automation?.PrimaryHeld() ?? false);
+        public static bool SecondaryDown() => _exclusiveVerificationInput ? _automation.SecondaryDown() : _desktop.SecondaryDown() || _pad.SecondaryDown() || _touch.SecondaryDown() || (_automation?.SecondaryDown() ?? false);
 
         /// <summary>Hotbar slot 0..8 picked directly this frame (number keys), or −1. Pad + touch have no
         /// direct pick (they cycle via <see cref="HotbarScroll"/>), so this is the keyboard's answer.</summary>
         public static int HotbarSlotDown()
         {
+            if (_exclusiveVerificationInput) return _automation.HotbarSlotDown();
             int s = _desktop.HotbarSlotDown();
-            return s >= 0 ? s : _pad.HotbarSlotDown();
+            if (s >= 0) return s;
+            int p = _pad.HotbarSlotDown();
+            return p >= 0 ? p : _automation?.HotbarSlotDown() ?? -1;
         }
 
         // ---- Glyphs -------------------------------------------------------------------------------------

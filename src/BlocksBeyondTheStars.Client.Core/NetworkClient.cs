@@ -116,9 +116,10 @@ namespace BlocksBeyondTheStars.Client
         public event Action<FactoryList>? FactoriesReceived; // factories on the current world (animated machines + terminals)
         public event Action<GameUnlocks>? GameUnlocksReceived;
 
-        // Story system ("The VEGA Protocol"): the active story's shared progress, the world's net fragments,
+        // Story system: the active story's shared progress, the world's net fragments,
         // a picked-up fragment's archive text, and a personal player memory unlocked by a machine kill.
         public event Action<StoryStateMessage>? StoryStateReceived;
+        public event Action<VeylSignalResponse>? VeylSignalReceived;
         public event Action<NetFragmentList>? NetFragmentsReceived;
         public event Action<NetFragmentRevealed>? NetFragmentRevealedReceived;
         public event Action<PlayerMemoryRevealed>? PlayerMemoryReceived;
@@ -695,6 +696,7 @@ namespace BlocksBeyondTheStars.Client
                 case SpeederList m: SpeedersReceived?.Invoke(m); break;
                 case SpeederFx m: SpeederFxReceived?.Invoke(m); break;
                 case StoryStateMessage m: StoryStateReceived?.Invoke(m); break;
+                case VeylSignalResponse m: VeylSignalReceived?.Invoke(m); break;
                 case NetFragmentList m: NetFragmentsReceived?.Invoke(m); break;
                 case NetFragmentRevealed m: NetFragmentRevealedReceived?.Invoke(m); break;
                 case PlayerMemoryRevealed m: PlayerMemoryReceived?.Invoke(m); break;

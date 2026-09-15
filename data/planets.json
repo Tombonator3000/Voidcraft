@@ -2,11 +2,11 @@
   {
     "key": "rocky", "baseTemperature": 12, "nameKey": "planet.rocky.name", "atmosphereHeight": 190, "cloudColor": 15593458, "cloudDensity": 0.35,
     "baseHeight": 64, "amplitude": 14, "terrainScale": 48.0, "terrainStyle": "mesa",
-    "surfaceBlock": "dirt", "subSurfaceBlock": "dirt", "deepBlock": "stone", "surfaceDepth": 4,
-    "caveThreshold": 0.74, "dataCacheRarity": 0.0012, "floraDensity": 0.03, "creatureAbundance": "few", "atmosphere": "toxic", "oxygenExtractability": 0.6, "spawnWeight": 14,
+    "surfaceBlock": "basalt", "subSurfaceBlock": "stone", "deepBlock": "stone", "surfaceDepth": 4,
+    "caveThreshold": 0.74, "dataCacheRarity": 0.0012, "floraDensity": 0.012, "creatureAbundance": "few", "atmosphere": "toxic", "oxygenExtractability": 0.6, "spawnWeight": 14,
     "biomes": [
-      { "surfaceBlock": "sand",  "subSurfaceBlock": "sand" },
-      { "surfaceBlock": "dirt",  "subSurfaceBlock": "dirt" },
+      { "surfaceBlock": "basalt", "subSurfaceBlock": "stone" },
+      { "surfaceBlock": "basalt", "subSurfaceBlock": "stone" },
       { "surfaceBlock": "stone", "subSurfaceBlock": "stone" }
     ],
     "ores": [

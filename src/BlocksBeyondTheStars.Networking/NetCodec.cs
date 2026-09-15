@@ -390,6 +390,7 @@ public static class NetCodec
 
         // Hotbar slot actions
         Register(202, typeof(PaintCraftIntent));         // Client -> Server (own texture onto a held material)
+        Register(203, typeof(VeylSignalResponse));       // Server -> Client (one-shot, world-local repair response)
     }
 
     private static void Register(byte tag, Type type)

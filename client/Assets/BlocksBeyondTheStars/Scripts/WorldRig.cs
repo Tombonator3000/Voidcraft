@@ -447,6 +447,9 @@ namespace BlocksBeyondTheStars.Client
             var oreScan = root.AddComponent<OreScanView>();
             oreScan.Game = boot;
 
+            var veylSignal = root.AddComponent<VeylSignalFx>();
+            veylSignal.Initialize(boot, shell.Settings);
+
             // Infrared overlay for the upgraded binoculars: cold-graded frame + through-terrain contact blobs.
             // Idle (and free) until BinocularOptic switches it on.
             var thermal = root.AddComponent<ThermalVision>();

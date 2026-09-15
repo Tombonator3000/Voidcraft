@@ -163,7 +163,15 @@ namespace BlocksBeyondTheStars.Client
             y += 52f;
 
             Head(ref y, L("ui.settings.comfort"));
+            Toggle(ref y, L("ui.settings.reduced_effects"), S.ReducedEffects, () =>
+            {
+                S.ReducedEffects = !S.ReducedEffects;
+                S.ApplyAccessibility();
+                ApplyLiveWorld();
+                Rebuild();
+            });
             Toggle(ref y, L("ui.settings.auto_stow"), S.AutoStowOnBoard, () => { S.AutoStowOnBoard = !S.AutoStowOnBoard; Rebuild(); });
+            Toggle(ref y, L("ui.settings.context_hud"), S.ContextHud, () => { S.ContextHud = !S.ContextHud; Rebuild(); });
             Toggle(ref y, L("ui.settings.show_enemy_health"), S.ShowEnemyHealthBars, () => { S.ShowEnemyHealthBars = !S.ShowEnemyHealthBars; Rebuild(); });
             Toggle(ref y, L("ui.settings.show_session_time"), S.ShowSessionTime, () => { S.ShowSessionTime = !S.ShowSessionTime; Rebuild(); });
             // Chat overlay: fade out on its own (default), stay up, or never show unprompted (#636). The
@@ -490,6 +498,7 @@ namespace BlocksBeyondTheStars.Client
                 post.Preset = S.Preset; // gates lens flare (Medium+) / motion blur (High+)
                 post.LensFlareEnabled = S.LensFlare;
                 post.MotionBlurEnabled = S.MotionBlur;
+                post.ReducedEffects = S.ReducedEffects;
             }
 
             var sky = FindAnyObjectByType<Sky>();
@@ -504,6 +513,24 @@ namespace BlocksBeyondTheStars.Client
                 pc.MouseSensitivity = S.MouseSensitivity;
                 pc.InvertY = S.InvertY;
                 pc.CameraMotion = S.CameraMotion;
+            }
+
+            var ambient = FindAnyObjectByType<AmbientParticles>();
+            if (ambient != null)
+            {
+                ambient.ReducedEffects = S.ReducedEffects;
+            }
+
+            var microFauna = FindAnyObjectByType<MicroFaunaView>();
+            if (microFauna != null)
+            {
+                microFauna.ReducedEffects = S.ReducedEffects;
+            }
+
+            var thermal = FindAnyObjectByType<ThermalVision>();
+            if (thermal != null)
+            {
+                thermal.ReducedEffects = S.ReducedEffects;
             }
 
             FindAnyObjectByType<VisorHud>()?.ApplyPreset(S.Preset, S.ReducedEffects);

@@ -211,9 +211,9 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>Last singleplayer world the player launched (pre-selected in the world picker).</summary>
         public string LastWorld = "singleplayer";
 
-        /// <summary>The official Velopack update feed: the GitHub repository, whose release assets carry
+        /// <summary>The Voidcraft Velopack update feed: the fork's GitHub repository, whose release assets carry
         /// the feed manifest + payload (read via Velopack's GithubSource — see <see cref="ClientUpdater"/>).</summary>
-        public const string DefaultUpdateFeedUrl = "https://github.com/marceld23/BlocksBeyondTheStars";
+        public const string DefaultUpdateFeedUrl = "https://github.com/Tombonator3000/Voidcraft";
 
         /// <summary>Velopack auto-update feed URL. Defaults to the official GitHub feed
         /// (<see cref="DefaultUpdateFeedUrl"/>); self-hosters can point it at their server's update
@@ -247,8 +247,8 @@ namespace BlocksBeyondTheStars.Client
         /// under a name claims it, later joins must match. Generated once on load, never shown in UI.</summary>
         public string PlayerToken = "";
 
-        /// <summary>Base URL of the official worlds portal (hosted-worlds control plane). Kept as a setting
-        /// so self-hosters can point the menu at their own WorldHost; empty = the official default.</summary>
+        /// <summary>Base URL of an optional worlds portal (hosted-worlds control plane). Voidcraft has no
+        /// official hosted service yet; self-hosters can point the menu at their own WorldHost.</summary>
         public string PortalUrl = "";
 
         /// <summary>Bearer session for the worlds portal, saved after a successful sign-in so the menu stays
@@ -259,7 +259,12 @@ namespace BlocksBeyondTheStars.Client
         public string PortalAccountName = "";
 
         // Accessibility
+        /// <summary>Replace traveling/full-screen bursts and dense ambient motion with gentler stationary
+        /// presentation while retaining the underlying information and audio cues.</summary>
         public bool ReducedEffects = false;
+
+        /// <summary>Show controls for the held tool and only currently relevant resource gauges.</summary>
+        public bool ContextHud = true;
 
         /// <summary>Legacy one-shot "large UI" flag. Superseded by the continuous <see cref="UiScale"/>
         /// setting (#483); kept only so an existing settings file that has it on is migrated once, in
@@ -742,7 +747,7 @@ namespace BlocksBeyondTheStars.Client
         {
             ApplyWindowMode();
             AudioListener.volume = Mathf.Clamp01(MasterVolume); // master bus (M26)
-            UiKit.ReducedMotion = ReducedEffects; // UI transitions snap instantly for reduced-effects users
+            ApplyAccessibility();
             UiKit.SetUserScale(UiScale);          // HUD canvases + the IMGUI leftovers follow the UI-scale setting
 
             int levels = QualitySettings.names != null ? QualitySettings.names.Length : 0;
@@ -804,6 +809,14 @@ namespace BlocksBeyondTheStars.Client
             }
 
             ApplyCameraLook();
+        }
+
+        /// <summary>Applies the shared UI accessibility state without reapplying display or quality settings.
+        /// The settings UI uses this so Reduced effects takes effect immediately while its normal Back action
+        /// remains responsible for persisting the preference.</summary>
+        public void ApplyAccessibility()
+        {
+            UiKit.ReducedMotion = ReducedEffects;
         }
 
         /// <summary>The active gameplay camera's URP data, set by <see cref="WorldRig"/> so graphics changes made in

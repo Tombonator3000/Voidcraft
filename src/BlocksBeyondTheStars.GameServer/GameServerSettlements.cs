@@ -179,6 +179,7 @@ public sealed partial class GameServer
             }
         }
 
+        AddVeylSurveyPois(session, pois);
         return pois;
     }
 
@@ -661,7 +662,7 @@ public sealed partial class GameServer
     /// <summary>Pins where a structure instance landed (#586). Batched — call
     /// <see cref="SavePlacementRecords"/> once per stamper after its loop.</summary>
     private void RecordPlacement(string kind, int index, Vector3i origin, int groundY, bool onIsland,
-        string seat, string name)
+        string seat, string name, int geometryVersion = 0)
     {
         var rec = FindPlacementRecord(kind, index);
         if (rec is null)
@@ -677,6 +678,7 @@ public sealed partial class GameServer
         rec.OnIsland = onIsland;
         rec.Seat = seat;
         rec.Name = name;
+        rec.GeometryVersion = geometryVersion;
         _placementRecordsDirty = true;
     }
 
@@ -1116,6 +1118,7 @@ public sealed partial class GameServer
     /// margin, wrapping on longitude.</summary>
     private bool OverlapsFootprint(int cx, int cz, int hw, int hl, List<(int Cx, int Cz, int Hw, int Hl)> rects, int margin)
     {
+        if (OverlapsPinnedVeyl(cx, cz, hw, hl, margin)) return true;
         int circ = _world.Circumference;
         foreach (var r in rects)
         {
@@ -1134,6 +1137,7 @@ public sealed partial class GameServer
     /// used by other surface stampers (wrecks/vaults/data cubes) to keep clear of settlements.</summary>
     public bool OverlapsAnySettlement(int x, int z, int halfExtent = 0)
     {
+        if (OverlapsPinnedVeyl(x, z, halfExtent, halfExtent, SettlementCollisionMargin)) return true;
         int circ = _world.Circumference;
         foreach (var s in _settlements)
         {

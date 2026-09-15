@@ -1,10 +1,10 @@
-# Blocks Beyond the Stars — Project Status
+# Voidcraft — Project Status
 
 The single source of truth for **what is built** and **what is still open**. Design notes and deep
 plans live under [docs/](docs/) (committed); the long-range direction is the strategy trio in
 [docs/strategy/](docs/strategy/vision.md) (vision · mission · roadmap); this file is the high-level status. Player-facing operation
 (controls, mechanics, editors, commands) is documented in [docs/user/USER_MANUAL.md](docs/user/USER_MANUAL.md) —
-keep it current when controls/features change. Last consolidated 2026-06-04.
+keep it current when controls/features change. Last consolidated 2026-09-15.
 
 **Build:** `scripts/build-client.ps1` (Windows) or `scripts/build-client.sh` (Linux) — publishes shared libs + bundled server + Unity player.
 **Test:** `./scripts/run-tests.sh` — currently **1547 server + 194 client passing** (2026-08-09). Locale parity (en/de) is enforced by a test.
@@ -13,13 +13,214 @@ tests in Release, and a per-test duration guardrail (`scripts/check-test-duratio
 The server suite is sharded across a 4-runner matrix (`scripts/partition-tests.py` + checked-in weights; `Tests passed` is the required fan-in check) — PR gate ~4½ min.
 A PR touching nothing but `data/locales/*.json` runs a single narrow `locale-tests` job instead of the matrix (`scripts/locale-test-filter.py`, ~140 tests).
 **Conventions:** English docs/comments; in-game text localized via locale keys — EN+DE mandatory-complete,
-FR/ES/PT/PL/TR/NL/RU/UK/ZH/JA/KO machine-first-pass, IT community + machine top-up (see docs/developer/TRANSLATION_GUIDE.md); commit to `main` with the
-Claude `Co-Authored-By` trailer; OpenAI texture + ElevenLabs sound generation is blanket-approved
-(no per-batch gate).
+FR/ES/PT/PL/TR/NL/RU/UK/ZH/JA/KO machine-first-pass, IT community + machine top-up (see docs/developer/TRANSLATION_GUIDE.md).
+Use feature branches and reviewed pull requests, with truthful authorship. New images for this work must
+use built-in ChatGPT image generation; Magnific is not authorized. Historical upstream service allowances
+are not a spending allowance for this implementation.
 
 Architecture: Unity 6 (URP since 2026-06-10) client + authoritative .NET 10 server, everything built in
 code (no scene authoring). One shared world; MessagePack networking for native clients plus a WebGL JSON
 envelope at the WebSocket edge; deterministic seed world-gen; SQLite default persistence with opt-in PostgreSQL.
+
+## Active Gauntlet continuation — 2026-09-15
+
+The approved continuation is tracked in [GAUNTLET_STATUS_2026-09-15.md](docs/developer/GAUNTLET_STATUS_2026-09-15.md).
+The ordinary seed-4242 expedition and second-process reload pass on a fresh `1280x720` Windowed/VSync-off
+test profile; the default `1920x1080` borderless/VSync profile still stalls in Loading at roughly 1 FPS.
+The latest `Linux-gauntlet11bh` candidate moves rocky lowlands to basalt/stone, reduces atlas noise,
+deepens rocky atmosphere, suppresses rocky flora glow, darkens crystal-like outcrops and reduces
+non-shell bloom/exposure. Those changes remain under visual-matrix review; the visual gate is not green.
+Treblo remains explicitly `UNAVAILABLE`, and the measured High/OpenGLCore performance sample is invalid
+for acceptance because it had zero focused frames and no prepared traversal phase. Unity EditMode is
+106/106 and PlayMode is 10/10 on the latest source; final target-profile journey/reload and focused
+performance evidence remain open.
+
+---
+
+## Concept implementation — 2026-09-14 (paused by user)
+
+The user stopped further development and authorized merging the verified checkpoint on September 14.
+PR #10 merged tested implementation through `fe81a9c` into `feat/voidcraft-playable` as `292e406f`; the unfinished ninth candidate is preserved
+separately on `wip/concept-upgrade-continuation-2026-09-14` and must not be described as verified or merged.
+The ordered restart plan is in
+[Concept validation — continuation plan](docs/developer/CONCEPT_VALIDATION_2026-09-14.md#continuation-plan-after-the-user-requested-stop).
+No local development, test, player or automatic continuation job remains running.
+
+Working branch: `feat/concept-visual-upgrade`, based on the playable fork at
+`9feb2f38feee0810f163a003fffb83532d287a0c`. The upstream-like `main` was inspected during the assessment,
+but is not the canonical playable baseline. Keep existing playable story and graphics work.
+Visual targets and representation rules: [Art Bible](docs/developer/ART_BIBLE.md).
+
+**Implemented in checkpoint `ad1a681`; visual and performance acceptance pending**
+
+- Independent physical height, roughness, metal and emission apertures for 27 common surfaces, including
+  basalt, ceramic ship walls, industrial floors, stone/runes, ice/crystal, lamps and quiet soil/grass. Shared 128-pixel atlas
+  retains legacy 64-pixel asset inputs and tile identities; normals stop at tile boundaries.
+- Material maps bound in gameplay, menu and intro, including the active URP parallax variant.
+- Restrained bloom and vignette candidate; lamp housings no longer inherit the whole emitter mask.
+- Optional contextual HUD: relevant resource gauges, held-tool/device-aware hints, separate Veyl direction
+  and objective readout, with EN/DE localization and persistence validation still pending.
+- Cached chamfered equipment and station fixtures, first-person padded glove/wrist, stable drill contact,
+  scene-lit ceramic/graphite/metal finishes, clear viewports and detailed doors with capsule-clearance gating.
+- Server-owned Veyl scan/excavate/supported-shape/response/homecoming loop. Co-op visitors can acknowledge
+  an existing repair; shared story response is credited once, while each explorer earns their own reward.
+  Specimens remain on the particular owned homecoming vessel and replicate to observers.
+- Corrected HUD camera setup: transparent UI no longer inherits full-screen SSAO, depth/opaque copies,
+  scene shadows or post. Smaller chromatic fringe keeps text readable. Savings are not measured yet.
+- All short creature voice-bank clips now request readable mono decompression for runtime voice
+  processing; the existing call importers were already configured correctly.
+- Performance probe now records movement/aboard state, terrain chunk coverage, raw frame times, memory
+  and supported rendering counters. Optional terrain preparation is labeled as scripted setup and a run
+  fails its traversal gate if actual movement is insufficient. Additional concept captures are likewise
+  explicitly separate from new-player journey verification.
+
+- New ships use an authored 6×11 m home layout with a 2 m aisle, framed cockpit, inward fixtures and safe
+  spawn. Persisted version zero preserves the original starter geometry and edits; repair follows the version.
+- New Veyl sites have a real buried vault, stepped frames, suspended voxel Anchor, open descending stair,
+  a repairable bridge shortcut, continuous two-meter side route and recoverable pit. Existing sites retain
+  their original geometry and marker version, including the version-two continuous central bridge.
+- Full real-input expedition/reload driver and explicit terrain queue readiness are implemented but await
+  complete player journey verification. Frame budgets and queue backpressure have no measured savings yet.
+
+**Evidence obtained**
+
+- Exact Unity 6000.4.9f1 and .NET SDK 10.0.401 installed in isolated tool locations; no engine upgrade.
+- Installed Playtest 5 launched under an isolated profile, captured scripted cockpit and planet views,
+  then logged a clean capture completion and server save/shutdown. These images show washed-out ceiling
+  lights and high-frequency material noise. The capture shortcut does not verify the real opening journey.
+- Exact playable baseline and first candidate both built with Unity 6000.4.9f1. The first candidate had
+  zero C# or shader build diagnostics; its frozen payload and source fingerprint are retained locally.
+- First candidate's five actual High captures are 1920×1080. The unchanged baseline screenshot harness
+  produced 1920×1008; its separate performance run was verified at 1920×1080.
+- Same-machine High performance (Intel Core Ultra 5 225U / Intel ARL, OpenGLCore): baseline idle average
+  68.05 ms / p95 88.69 ms; first candidate idle 65.23 ms / p95 84.37 ms. Candidate forward-input phase
+  averaged 67.57 ms and included a 2847.7 ms stall. This is roughly 15 FPS, **not a performance pass**.
+  These old phases do not prove terrain traversal; the next probe has displacement telemetry.
+- Initial Unity EditMode tests: 29/34 passed, five equipment tests failed. Focused atlas PlayMode failed
+  before its material assertions because of a nonexistent floor key. The corrected second candidate
+  subsequently built and passed all 55 EditMode cases and the atlas PlayMode case. Six water-reflection
+  shader warnings require the next build to verify the explicit-LOD correction. Its capture attempt
+  stalled before the first image and was stopped as incomplete; a flag-only background execution override
+  and focus telemetry are being validated before new visual/performance claims.
+- Corrected source: 74 selected server cases and 202 Client.Tests passed, zero skipped. Full CI-filter
+  clean rebuild: zero warnings/errors; full format verification: zero changes in 667 files. Earlier
+  interrupted full-suite attempts are not passes. Raw logs/TRX/fingerprints are in local ignored artifacts.
+- Third player: zero build diagnostics, 55+1 Unity cases passed, seven actual 1080p captures. Same High
+  spawn idle averaged 59.86 ms (p95 65.92); input phase stayed aboard and moved only 1.12 m. Terrain
+  preparation failed and exited 2. No settled-workload or traversal pass; all sampled frames were focused.
+- Fourth .NET checkpoint: corrected clean CI build zero warnings/errors; 74 architecture cases and all
+  205 Client.Tests passed, zero skipped. Full restored format verification: zero changes in 670 files.
+  Fourth Unity player passed 60 EditMode and one atlas PlayMode case; six 1080p captures completed.
+  First journey attempt timed out during the first-run intro, before the world started. Fifth source
+  extends startup diagnostics, fixes terrain bevel holes and glowvine emission, and rejects performance
+  samples that overlap prologue camera motion. Fifth clean build and all 70 Unity cases passed; the real
+  journey entered the world and walked 5.75 m, then stopped at a probable harness step-down error. Save
+  inspection confirmed server movement; no complete journey/reload pass. Normal startup has a separate
+  Linux VSync/frame-pacing issue under investigation. Sixth source passes a clean warning-free CI build,
+  95 selected server cases, 205 Client.Tests and full format verification (0 of 674 files changed). Sixth
+  player compiled cleanly; four new EditMode failures exposed an authored-opacity defect and incomplete
+  test fixture setup. Corrections passed focused regressions. Seventh player is clean and all 86 Unity
+  cases pass, zero skips. Its third real journey verifies hatch exit, scanner selection and 13.4 m of
+  walking, then stops at a terrain obstacle the bounded local planner cannot route around. Input
+  isolation and graceful shutdown pass; complete expedition/reload, new captures and valid performance
+  samples remain pending.
+- A new derivative concept sheet was generated with built-in ChatGPT only; its prompt and provenance
+  are retained with the earlier references. A specific image model version was not exposed by the tool.
+- Seventh rocky capture shows the actual Veyl vault with all terrain work complete; its major forms
+  exist but light separation and route readability need correction. Default/rocky home and terrain
+  shots mostly had pending work. The input-isolated idle run held the camera/body fixed but revealed
+  ten-second redundant seam chunk eviction/resend bursts. No accepted performance gain yet.
+- Broad PR CI found five Veyl placement-guarantee failures on rough/wet planet seeds. The next candidate
+  corrects placement, seam eviction, navigation detours, aimed station hints, equipment/casing
+  readability, versioned vault lighting, and material/comfort-aware mining feedback. Eighth-source clean
+  CI build has zero warnings/errors; 135 selected server cases and all 205 Client.Tests pass, zero skips.
+  This includes all five previously failing planet seeds, supported half-step approaches, persisted
+  reservations, player-edit protection and repeated real streaming sweeps. Full restored format passes
+  with zero changes across 677 files. The full eighth Linux player builds without C#/shader diagnostics
+  and all 100 Unity cases pass, zero skipped; source/payload hashes still match. Its fourth journey
+  exposes two test-driver stair/arrival issues at the hatch. The first valid idle sample has zero terrain
+  work throughout 30 seconds, confirming the prior periodic bursts are absent in that sample, but
+  48.888 ms average / 52.946 ms p95 still misses 60 FPS. The complete same-player SSAO/POM sweep is valid:
+  SSAO-off saves 11.25–11.83% frame time, POM-off only 0.40–1.04%; ordinary defaults remain unchanged.
+  Nine settled 1080p captures show improvements but the forward cabin view is missing. Full journey
+  and visual acceptance remain open. All four PR CI shards pass; cloud validation and both Windows/Linux
+  packages completed successfully in run 34887583373.
+- The unfinished ninth snapshot adds local basalt clusters, the server-triggered spatial signal pulse,
+  navigation/capture corrections and diagnostic render-scale/thread timing controls. Its clean .NET
+  build passes; initial targeted tests are 79/82, with three failures. The ocean placement fixture
+  correction is saved but untested; two wrapped response fixtures remain unresolved. No ninth Unity
+  build, full test pass, journey or performance result exists.
+- [Validation record](docs/developer/CONCEPT_VALIDATION_2026-09-14.md) distinguishes candidates and evidence.
+
+**Required work still open — first ten-minute sequence is a checkpoint, not the whole request**
+
+- [ ] Complete and test scan → follow → excavate → shape/build → world signal response → new ability →
+  homecoming, including server authority, forged input rejection, reload and multiplayer behavior.
+- [ ] Match the defining large forms: basalt terrain/landmark, detailed useful ship home and monumental
+  excavated anchor. Current material changes alone do not satisfy the concepts.
+- [ ] Finish the visible tool/hand/door/cockpit/module improvements and verify footprints/collision.
+- [ ] Connect discoveries to persistent physical specimens and map changes aboard the ship.
+- [ ] Make expedition warnings give a readable choice to continue, build shelter or return; reinforce
+  planet-specific landscape, atmosphere, material, sound and risk.
+- [ ] Exercise useful construction scenarios (bridge, power, shelter, shaped signal solution), preserving
+  editable world truth and more than one valid route where appropriate.
+- [ ] Verify action sound, impacts, particles, device controls and comfort toggles in runtime.
+- [ ] Run affected .NET and Unity suites, clean warning/error checks and format verification; fix failures.
+- [ ] Review actual 1080p candidate views against all three concepts; iterate on defining mismatches.
+- [ ] Measure the same candidate/preset on the named hardware: p95 ≤16.67 ms, p99 <20 ms, report stalls
+  >50 ms, memory and representative traversal/building/ship/ruin costs. No performance pass yet.
+- [ ] Demonstrate the actual new-player journey and restart/continuation, separately from scripted setup.
+- [x] Preserve verified checkpoint `ad1a681` and updated player documentation; open unmerged
+  [draft PR #10](https://github.com/Tombonator3000/Voidcraft/pull/10) (2026-09-14).
+- [x] Push verified correction checkpoint `fe81a9c`, including placement, seam streaming and 100 passing
+  Unity cases. The PR remains a draft while runtime and distribution gates are open.
+- [x] Produce the distributable playtest through the project's cloud workflow with the existing playtest
+  guide. Corrected run 34887583373 passed validation and both Windows/Linux builds (2026-09-14). [Run 34882893539](https://github.com/Tombonator3000/Voidcraft/actions/runs/34882893539) was
+  dispatched for `ad1a681`; validation failed on five placement cases (1830/1835 server cases passed),
+  so Windows/Linux packaging was skipped. Corrected `fe81a9c` is being validated in
+  [run 34887583373](https://github.com/Tombonator3000/Voidcraft/actions/runs/34887583373).
+
+---
+
+## Voidcraft foundation
+
+First identity/story slice on branch `feat/voidcraft-foundation` (2026-08-07), with GitHub playtest delivery
+on `feat/voidcraft-playable` (2026-08-12), built on the AGPL-licensed Blocks Beyond the Stars foundation.
+Design and scope: [Voidcraft foundation](docs/developer/VOIDCRAFT_FOUNDATION.md).
+
+**Done**
+
+- Player-facing title and desktop product metadata changed to **Voidcraft** while technical executable,
+  namespace and Unity data-folder names remain unchanged.
+- New default story pack `voidcraft_awakening` (**The Sleeper Signal**): 13 beats, 6 fragments, 4 memories,
+  5 NPC flavour lines and a 4-node finale argument, authored in complete EN+DE locales.
+- Fresh-world prologue/intro reframed around an erased ship log and a subsurface signal; original
+  `vega_protocol` remains installed and `none` remains available for sandbox play.
+- Finale reveal/resolution and contextual insight lines moved out of VEGA-specific server constants and into
+  story-pack data; story validation now covers every referenced story locale key.
+- Registry, loader and server-story tests updated for the new default and multi-pack compatibility.
+- Fork-facing update/news/contribution links now target `Tombonator3000/Voidcraft`; the upstream Official
+  Worlds service is disabled by default while explicit self-hosted WorldHost URLs remain supported.
+- Fork-specific `voidcraft-playtest.yml` validates the fast .NET tier and produces a portable Windows player
+  plus a permission-preserving Kubuntu/Linux tarball, each with its platform-native bundled local server.
+  Setup/download instructions and in-archive start guides are committed.
+- The first GitHub run compiled with zero warnings and exposed a story-locale test false positive: legitimate
+  bracket-led recovered-log prose is now checked with `Localizer.Has` instead of mistaken for `[missing.key]`.
+- Bundled Singleplayer/Host now places the active story pack's first unread fragment roughly 20 blocks from
+  the starting pad. In Voidcraft this is the recovered VEGA ship trace and immediately unlocks **The signal
+  below**; dedicated servers retain the rarer world-seeded scatter.
+
+**Open before a public Voidcraft build**
+
+- Expand the guaranteed opening signal shard into a full terrain/structure **Signal Scar** encounter, then
+  tune the first 30 minutes through playtests.
+- Add a visible three-way world-creation selector (Sleeper Signal / VEGA Protocol / sandbox).
+- Create a distinct logo, menu imagery, Anchor geometry/audio and Voidcraft screenshots.
+- Smoke-test the first Kubuntu artifact on physical hardware, including launching Singleplayer and recovering
+  the nearby opening signal. See [Voidcraft GitHub playtest](docs/developer/VOIDCRAFT_PLAYTEST.md).
+- Create fork-owned hosted-world/release infrastructure before enabling those public services.
+- Run the full .NET and Unity suites in a dependency-complete build environment, then package signed release
+  clients. The playtest workflow intentionally runs the non-Slow .NET tier and produces an unsigned artifact.
 
 ---
 

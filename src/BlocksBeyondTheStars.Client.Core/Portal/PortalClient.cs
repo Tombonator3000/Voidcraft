@@ -225,7 +225,9 @@ namespace BlocksBeyondTheStars.Client.Portal
     /// </summary>
     public sealed class PortalClient
     {
-        public const string DefaultPortalUrl = "https://play.blocksbeyondthestars.de";
+        // Voidcraft does not operate a hosted-worlds service yet. Passing an explicit URL keeps the
+        // self-hosted WorldHost path available without presenting the upstream service as ours.
+        public const string DefaultPortalUrl = "";
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {

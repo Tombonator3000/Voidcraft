@@ -32,7 +32,7 @@ namespace BlocksBeyondTheStars.Client
                 UiKit.AddText(root, 250f, yy, 50f, 22f, shell.L("ui.sys.ok"), 15, UiKit.Ok, TextAnchor.MiddleLeft, FontStyle.Bold);
             }
 
-            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "BLOCKS BEYOND THE STARS", 56);
+            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "VOIDCRAFT", 64);
             UiKit.AddText(root, 1700f, 44f, 180f, 24f, "VER. " + AppShell.Version, 16, UiKit.CyanDim, TextAnchor.MiddleRight);
 
             // Progress bar.

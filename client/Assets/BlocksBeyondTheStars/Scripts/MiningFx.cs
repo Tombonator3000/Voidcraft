@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // This file is part of Blocks Beyond the Stars. See LICENSE for the full AGPL-3.0 text.
 using BlocksBeyondTheStars.Networking.Messages;
+using BlocksBeyondTheStars.Shared.Geometry;
+using BlocksBeyondTheStars.Shared.Primitives;
 using UnityEngine;
 
 namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// Mining/placing feedback (M27 polish): a wireframe selection box on the block the player is
-    /// looking at, and a small debris burst when a block is mined or placed. Code-built (12 thin
-    /// edge cubes + cube particles) on the always-included Unlit/Color shader — no assets, no new
+    /// looking at, and a small debris burst when a block is mined or placed. Code-built (one mesh for
+    /// twelve thin edges + particles) on the always-included Unlit/Color shader — no assets, no new
     /// shader. Render-only; the server stays authoritative over the actual block changes.
     /// </summary>
     public sealed class MiningFx : MonoBehaviour
@@ -19,19 +21,18 @@ namespace BlocksBeyondTheStars.Client
         public float Reach = 6f;
 
         private GameObject _outline;
+        private Mesh _outlineMesh;
+        private static readonly Color SelectionColor = new(0.28f, 0.52f, 0.58f);
         private Material _outlineMat;
-        private Material _digMat;
-        private Material _placeMat;
         private Material _flashMat;
         private bool _subscribed;
 
         private void Start()
         {
-            _outlineMat = Mat(new Color(0.05f, 0.05f, 0.06f));
-            _digMat = Mat(new Color(0.65f, 0.58f, 0.48f));
-            _placeMat = Mat(new Color(0.80f, 0.85f, 0.95f));
+            _outlineMat = Mat(SelectionColor);
             _flashMat = Mat(new Color(1f, 0.86f, 0.5f));
-            _outline = BuildWireCube(_outlineMat);
+            _outline = BuildWireCube(_outlineMat, out _outlineMesh);
+            _outline.transform.SetParent(transform, false);
             _outline.SetActive(false);
         }
 
@@ -39,7 +40,7 @@ namespace BlocksBeyondTheStars.Client
         {
             if (!_subscribed && Game?.Network != null)
             {
-                Game.Network.BlockChanged += OnBlock;
+                Game.BlockChangeApplied += OnBlockApplied;
                 Game.Network.MiningProgressReceived += OnMineProgress;
                 _subscribed = true;
             }
@@ -64,9 +65,10 @@ namespace BlocksBeyondTheStars.Client
                 _outline.transform.position = new Vector3(bx + 0.5f, by + 0.5f, bz + 0.5f);
                 _outline.SetActive(true);
 
-                // Tint the box from dark toward hot orange as the block cracks under the drill.
-                float frac = (bx == _crackX && by == _crackY && bz == _crackZ && Time.time - _crackAt < 0.4f) ? _crackFrac : 0f;
-                _outlineMat.color = Color.Lerp(new Color(0.05f, 0.05f, 0.06f), new Color(1f, 0.45f, 0.12f), frac);
+                // A thin muted outline leaves glass useful; orange still communicates mining progress.
+                float frac = (bx == Mathf.FloorToInt(Game.SceneX(_crackX)) && by == _crackY
+                    && bz == Mathf.FloorToInt(Game.SceneZ(_crackZ)) && Time.time - _crackAt < 0.4f) ? _crackFrac : 0f;
+                _outlineMat.color = ShaderColor.Srgb(Color.Lerp(SelectionColor, new Color(1f, 0.45f, 0.12f), frac));
             }
             else
             {
@@ -141,36 +143,52 @@ namespace BlocksBeyondTheStars.Client
             _crackAt = Time.time;
             if (Game?.World != null)
             {
-                // Sample the block while it still exists — by the time BlockChanged arrives the world
-                // has already been updated, so this is the only place the mined id is observable.
+                // Retain the local target for its progress and pickup animation. Debris uses the
+                // confirmed old/new material supplied by BlockChangeApplied, including remote edits.
                 _crackBlock = Game.World.GetBlock(m.X, m.Y, m.Z);
+                if (_crackBlock.IsAir)
+                    _crackBlock = Game.LandedShipBlockAt(m.X, m.Y, m.Z, out _, out _);
             }
         }
 
-        private void OnBlock(BlockChanged m)
+        private void OnBlockApplied(Vector3i cell, BlockId oldId, BlockId newId)
         {
-            var pos = new Vector3(m.X + 0.5f, m.Y + 0.5f, m.Z + 0.5f);
-            SpawnBurst(pos, m.Block == 0 ? _digMat : _placeMat);
-            if (m.Block != 0)
+            if (Game == null) return;
+            if (oldId == newId || IsFluid(oldId) || IsFluid(newId)) return;
+            var pos = Game.ScenePos(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f);
+            // Remote construction still updates the world, but does not allocate invisible impact effects.
+            if (Camera == null || (Camera.transform.position - pos).sqrMagnitude > 24f * 24f) return;
+            bool tracked = cell.X == _crackX && cell.Y == _crackY && cell.Z == _crackZ;
+            var id = !newId.IsAir ? newId : oldId;
+            var block = Game?.Content?.BlockById(id);
+            Color debris = new(0.45f, 0.42f, 0.36f);
+            if (block != null && BlockSurfaceLibrary.Contains(block.Key))
+                debris = BlockSurfaceLibrary.Sample(block.Key, 0.43f, 0.57f).Albedo;
+            else if (block?.Color is int packed)
+                debris = new Color(((packed >> 16) & 255) / 255f, ((packed >> 8) & 255) / 255f, (packed & 255) / 255f);
+            bool reduced = Game?.Settings?.ReducedEffects == true;
+            SpawnBurst(pos, debris, reduced);
+            if (!newId.IsAir)
             {
                 return;
             }
 
-            FlashAt(pos); // the final-hit pop
-            if (m.X == _crackX && m.Y == _crackY && m.Z == _crackZ && _crackBlock.Value != 0)
+            if (!reduced && tracked) FlashAt(pos);
+            if (tracked && _crackBlock.Value != 0)
             {
                 HudUi.Instance?.FlyPickup(pos, _crackBlock); // mined tile flies into the hotbar
                 _crackBlock = default;
             }
         }
 
-        /// <summary>A bright one-shot pop slightly proud of the broken block — the "final hit" flash.</summary>
+        /// <summary>A small contact glint on the mined cell, omitted by reduced-effects settings.</summary>
         private void FlashAt(Vector3 pos)
         {
             var p = GameObject.CreatePrimitive(PrimitiveType.Cube);
             StripCollider(p);
+            p.transform.SetParent(transform, false);
             p.transform.position = pos;
-            p.transform.localScale = Vector3.one * 1.06f;
+            p.transform.localScale = Vector3.one * 0.14f;
             p.GetComponent<Renderer>().sharedMaterial = _flashMat;
             p.AddComponent<FlashFx>();
         }
@@ -180,7 +198,7 @@ namespace BlocksBeyondTheStars.Client
         /// <summary>A small debris/dust puff when a block is mined or placed: a one-shot ParticleSystem burst of
         /// soft alpha bits in the dig/place colour that arc out under gravity and fade, then self-destroys. Replaces
         /// the old Unlit debris cubes.</summary>
-        private void SpawnBurst(Vector3 pos, Material mat)
+        private void SpawnBurst(Vector3 pos, Color color, bool reduced)
         {
             var shader = Shader.Find("BlocksBeyondTheStars/ParticleAlpha");
             if (shader == null)
@@ -191,6 +209,7 @@ namespace BlocksBeyondTheStars.Client
             _burstMat ??= new Material(shader) { mainTexture = SoftDot() };
 
             var go = new GameObject("MineBurst");
+            go.transform.SetParent(transform, false);
             go.transform.position = pos;
             var ps = go.AddComponent<ParticleSystem>();
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -198,18 +217,18 @@ namespace BlocksBeyondTheStars.Client
             var main = ps.main;
             main.loop = false;
             main.duration = 0.2f;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.6f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 3.4f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.2f);
-            main.startColor = mat != null ? mat.color : new Color(0.6f, 0.55f, 0.45f, 1f);
-            main.maxParticles = 24;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(reduced ? 0.12f : 0.3f, reduced ? 0.2f : 0.6f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(reduced ? 0.6f : 1.2f, reduced ? 1.3f : 3.4f);
+            main.startSize = new ParticleSystem.MinMaxCurve(reduced ? 0.04f : 0.06f, reduced ? 0.07f : 0.14f);
+            main.startColor = ShaderColor.Srgb(color);
+            main.maxParticles = reduced ? 3 : 12;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.gravityModifier = 0.8f; // chips arc and fall
             main.stopAction = ParticleSystemStopAction.Destroy;
 
             var em = ps.emission;
             em.rateOverTime = 0f;
-            em.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)10) });
+            em.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)(reduced ? 3 : 10)) });
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Hemisphere; // bias the spray upward/outward from the face
@@ -228,7 +247,7 @@ namespace BlocksBeyondTheStars.Client
             sol.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.4f));
 
             var r = go.GetComponent<ParticleSystemRenderer>();
-            r.material = _burstMat;
+            r.sharedMaterial = _burstMat;
             r.renderMode = ParticleSystemRenderMode.Billboard;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             r.receiveShadows = false;
@@ -263,11 +282,16 @@ namespace BlocksBeyondTheStars.Client
             return tex;
         }
 
-        private static GameObject BuildWireCube(Material mat)
+        private static GameObject BuildWireCube(Material mat, out Mesh mesh)
         {
-            const float t = 0.05f;   // edge thickness
+            const float t = 0.015f;   // edge thickness
             const float s = 1.04f;    // edge length (slightly proud of the block)
             var root = new GameObject("BlockOutline");
+            var source = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            source.SetActive(false);
+            var cube = source.GetComponent<MeshFilter>().sharedMesh;
+            var edges = new CombineInstance[12];
+            int index = 0;
 
             // Twelve edges of a unit cube centred on the root: 4 along each axis.
             for (int a = 0; a < 3; a++)
@@ -281,16 +305,33 @@ namespace BlocksBeyondTheStars.Client
                     else if (a == 1) { pos = new Vector3(u, 0f, v); scale = new Vector3(t, s, t); }
                     else { pos = new Vector3(u, v, 0f); scale = new Vector3(t, t, s); }
 
-                    var edge = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    StripCollider(edge);
-                    edge.transform.SetParent(root.transform, false);
-                    edge.transform.localPosition = pos;
-                    edge.transform.localScale = scale;
-                    edge.GetComponent<Renderer>().sharedMaterial = mat;
+                    edges[index++] = new CombineInstance { mesh = cube,
+                        transform = Matrix4x4.TRS(pos, Quaternion.identity, scale) };
                 }
             }
 
+            mesh = new Mesh { name = "Block selection edges" };
+            mesh.CombineMeshes(edges, true, true);
+            root.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = root.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = mat;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            Destroy(source);
             return root;
+        }
+
+        private void OnDestroy()
+        {
+            if (_subscribed && Game?.Network != null)
+            {
+                Game.BlockChangeApplied -= OnBlockApplied;
+                Game.Network.MiningProgressReceived -= OnMineProgress;
+            }
+            if (_outline != null) Destroy(_outline);
+            if (_outlineMesh != null) Destroy(_outlineMesh);
+            if (_outlineMat != null) Destroy(_outlineMat);
+            if (_flashMat != null) Destroy(_flashMat);
         }
 
         private static Material Mat(Color c)
@@ -308,16 +349,16 @@ namespace BlocksBeyondTheStars.Client
             }
         }
 
-        /// <summary>The final-hit flash: a bright shell that swells slightly and vanishes in ~0.12 s.</summary>
+        /// <summary>The contact glint grows a few centimeters and vanishes in 0.08 s.</summary>
         private sealed class FlashFx : MonoBehaviour
         {
-            private const float Life = 0.12f;
+            private const float Life = 0.08f;
             private float _t;
 
             private void Update()
             {
                 _t += Time.deltaTime;
-                transform.localScale = Vector3.one * Mathf.Lerp(1.06f, 1.22f, _t / Life);
+                transform.localScale = Vector3.one * Mathf.Lerp(0.14f, 0.22f, _t / Life);
                 if (_t >= Life)
                 {
                     Destroy(gameObject);

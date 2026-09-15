@@ -11,7 +11,7 @@ namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// The uGUI main menu (M27 UI rework): the sci-fi mockup look built in code via <see cref="UiKit"/>
-    /// — a SYSTEM CHECK panel, the BLOCKS BEYOND THE STARS title, framed cyan menu buttons wired to the shell, a
+    /// — a SYSTEM CHECK panel, the VOIDCRAFT title, framed cyan menu buttons wired to the shell, a
     /// tagline and the version. Shown over the animated <see cref="MenuBackground"/>. AppShell spawns
     /// it on the MainMenu phase and destroys it on leaving. Decorative panels (world/server info,
     /// community bar) + editable host/port land in a follow-up.
@@ -38,7 +38,7 @@ namespace BlocksBeyondTheStars.Client
             }
 
             // --- Title ---
-            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "BLOCKS BEYOND THE STARS", 64);
+            UiKit.AddLogo(root, 360f, 70f, 1200f, 96f, "VOIDCRAFT", 72);
             UiKit.AddText(root, 1700f, 44f, 180f, 24f, "VER. " + AppShell.Version, 16, UiKit.CyanDim, TextAnchor.MiddleRight);
 
             // Connect-to-server dialog (built below; the JOIN button reveals it). Captured by the button.
@@ -219,13 +219,25 @@ namespace BlocksBeyondTheStars.Client
                     connect.SetActive(true);
                 }
             }, "btn_join");
-            UiKit.AddButton(root, bx, nby + gap * 3f, bw, bh, shell.L("ui.menu.official"), () =>
+            bool hasHostedWorlds = !string.IsNullOrWhiteSpace(shell.Settings.PortalUrl)
+                || !string.IsNullOrWhiteSpace(PortalClient.DefaultPortalUrl);
+            if (hasHostedWorlds)
             {
-                if (CommitName() && official != null)
+                UiKit.AddButton(root, bx, nby + gap * 3f, bw, bh, shell.L("ui.menu.official"), () =>
                 {
-                    official.SetActive(true);
-                }
-            }, "btn_join");
+                    if (CommitName() && official != null)
+                    {
+                        official.SetActive(true);
+                    }
+                }, "btn_join");
+            }
+            else
+            {
+                // The fork has no official hosted-worlds service yet. Keep the row useful and honest:
+                // singleplayer, LAN hosting and direct joins work, while this links to Voidcraft itself.
+                UiKit.AddButton(root, bx, nby + gap * 3f, bw, bh, shell.L("ui.contribute.github"),
+                    () => Application.OpenURL("https://github.com/Tombonator3000/Voidcraft"), "btn_credits");
+            }
             UiKit.AddButton(root, bx, nby + gap * 4f, bw, bh, shell.L("ui.menu.editors"), () => shell.GoTo(ShellPhase.Editors), "btn_singleplayer");
             UiKit.AddButton(root, bx, nby + gap * 5f, bw, bh, shell.L("ui.menu.settings"), shell.OpenSettings, "btn_settings");
             UiKit.AddButton(root, bx, nby + gap * 6f, bw, bh, shell.L("ui.menu.credits"), () => shell.GoTo(ShellPhase.Credits), "btn_credits");
@@ -1809,15 +1821,10 @@ namespace BlocksBeyondTheStars.Client
             Para(212f, 50f, "2.  " + shell.L("ui.contribute.play"), 17, UiKit.TextCol);
             Para(266f, 70f, "3.  " + shell.L("ui.contribute.bugs"), 17, UiKit.TextCol);
             Para(340f, 50f, "4.  " + shell.L("ui.contribute.dev"), 17, UiKit.TextCol);
-            // Real buttons, not link-styled text (#544): the GitHub line used to be a dead AddText that
-            // merely LOOKED clickable. GitHub + the game website open in the system browser; the website
-            // follows the UI language (the German site is the root, English lives under /en).
-            UiKit.AddButton(pdlg, 60f, 414f, 380f, 46f, shell.L("ui.contribute.github"),
-                () => Application.OpenURL("https://github.com/marceld23/BlocksBeyondTheStars"), "btn_credits");
-            UiKit.AddButton(pdlg, 460f, 414f, 280f, 46f, shell.L("ui.contribute.website"),
-                () => Application.OpenURL(shell.Settings.Language == "de"
-                    ? "https://www.blocksbeyondthestars.com/"
-                    : "https://www.blocksbeyondthestars.com/en"), "btn_credits");
+            // Voidcraft does not have a separate project website yet. One full-width button sends
+            // contributors to the fork instead of presenting the upstream website as Voidcraft's.
+            UiKit.AddButton(pdlg, 60f, 414f, 680f, 46f, shell.L("ui.contribute.github"),
+                () => Application.OpenURL("https://github.com/Tombonator3000/Voidcraft"), "btn_credits");
             UiKit.AddButton(pdlg, 270f, 500f, 260f, 52f, shell.L("ui.menu.back"), () => participate.SetActive(false), "btn_exit");
             participate.SetActive(false);
 

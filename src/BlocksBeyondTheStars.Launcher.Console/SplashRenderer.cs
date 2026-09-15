@@ -47,7 +47,7 @@ internal static class SplashRenderer
         using var bodyFont = SKTypeface.FromFamilyName("sans-serif", SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 
         float titleSize = Math.Max(11f, height * 0.130f);
-        string titleText = "Blocks Beyond the Stars";
+        string titleText = "Voidcraft";
         float maxTitleW = width * 0.86f;
 
         using var skFont = new SKFont(titleFont, titleSize);

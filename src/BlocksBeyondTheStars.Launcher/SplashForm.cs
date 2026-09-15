@@ -45,7 +45,7 @@ internal sealed class SplashForm : Form
         ShowInTaskbar = true;
         TopMost = true;
         DoubleBuffered = true;
-        Text = "Blocks Beyond the Stars";
+        Text = "Voidcraft";
         Size = new Size(560, 320);
         BackColor = Color.FromArgb(6, 9, 18);
 
@@ -208,7 +208,7 @@ internal sealed class SplashForm : Form
 
         var cyan = Color.FromArgb(125, 222, 236);
         var titleColor = Color.FromArgb(233, 244, 255);
-        const string titleText = "Blocks Beyond the Stars";
+        const string titleText = "Voidcraft";
 
         // Auto-fit the title to the width so it never wraps or clips, whatever the size/DPI.
         float maxTitleW = w * 0.86f;

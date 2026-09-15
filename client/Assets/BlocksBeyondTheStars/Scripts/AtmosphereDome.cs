@@ -6,21 +6,31 @@ using UnityEngine;
 namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
-    /// An additive atmosphere-glow dome (<c>BlocksBeyondTheStars/Atmosphere</c>) that brightens the horizon and
-    /// scatters a warm halo around the sun at dawn/dusk on planets with air — so the sky reads like a real
-    /// atmosphere instead of a flat fill, without replacing <see cref="Sky"/>'s day/night sky colour. Follows the
-    /// camera at "infinity" like the <see cref="Starfield"/> / <see cref="NebulaField"/>; fades out in space, on
-    /// airless bodies and inside stations (where <see cref="NebulaField"/> takes over). The shader reads the same
-    /// sky globals Sky.cs sets and self-dims at night (the sun colour goes dark), so this just gates the fade.
+    /// Camera-centred atmospheric scattering dome (<c>BlocksBeyondTheStars/Atmosphere</c>). It complements
+    /// <see cref="Sky"/>'s day/night sky colour with a cheap, stylised Rayleigh/Mie-inspired scattering layer:
+    /// longer optical paths brighten the horizon, forward Mie scattering builds the sun halo, and low-sun
+    /// extinction warms dawn/dusk. Planet atmosphere density and weather intensity drive the shader so different
+    /// worlds do not share one fixed Earth-like look.
+    ///
+    /// The dome follows the camera at "infinity" like <see cref="Starfield"/> / <see cref="NebulaField"/> and fades
+    /// out in space, on airless bodies and inside stations. It is presentation-only; no world/gameplay state is
+    /// derived here.
     /// </summary>
     public sealed class AtmosphereDome : MonoBehaviour
     {
         public GameBootstrap Game;
         public Camera Camera;
 
+        private static readonly int BrightnessId = Shader.PropertyToID("_Brightness");
+        private static readonly int DensityId = Shader.PropertyToID("_Density");
+        private static readonly int WeatherId = Shader.PropertyToID("_Weather");
+
         private Transform _dome;
         private Material _mat;
-        private float _brightness; // smoothed 0..1 fade
+        private Mesh _mesh;
+        private float _brightness; // smoothed 0..1 visibility fade
+        private float _density = 0.4f;
+        private float _weather;
 
         private void Awake()
         {
@@ -32,11 +42,14 @@ namespace BlocksBeyondTheStars.Client
             }
 
             _mat = new Material(shader);
-            _mat.SetFloat("_Brightness", 0f);
+            _mat.SetFloat(BrightnessId, 0f);
+            _mat.SetFloat(DensityId, _density);
+            _mat.SetFloat(WeatherId, 0f);
 
             var go = new GameObject("Atmosphere");
             go.transform.SetParent(transform, false);
-            go.AddComponent<MeshFilter>().sharedMesh = BuildDomeMesh();
+            _mesh = BuildDomeMesh();
+            go.AddComponent<MeshFilter>().sharedMesh = _mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = _mat;
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -57,13 +70,38 @@ namespace BlocksBeyondTheStars.Client
             float r = Mathf.Max(200f, Camera.farClipPlane) * 0.43f; // just inside the star/nebula domes
             _dome.localScale = new Vector3(r, r, r);
 
+            var env = Game.Environment;
+
             // Visible only where there IS an atmosphere: a normal planet sky. Off in the space view, on airless
             // bodies and inside an orbital station (those show the nebula/stars instead).
             bool spaceSky = Game.SpaceViewActive || !string.IsNullOrEmpty(Game.StationName)
-                            || (Game.Environment != null && Game.Environment.SpaceSky) || Game.OnFootInSpace;
-            float target = spaceSky ? 0f : 1f;
-            _brightness = Mathf.MoveTowards(_brightness, target, Time.deltaTime * 0.9f);
-            _mat.SetFloat("_Brightness", _brightness);
+                            || (env != null && env.SpaceSky) || Game.OnFootInSpace;
+            float targetBrightness = spaceSky ? 0f : 1f;
+            _brightness = Mathf.MoveTowards(_brightness, targetBrightness, Time.deltaTime * 0.9f);
+
+            // These are server-seeded/world-authoritative environment values, consumed only as visual controls.
+            // Smooth them because environment snapshots/weather transitions can arrive discretely.
+            float targetDensity = env != null ? Mathf.Clamp01(env.AtmosphereDensity) : 0.4f;
+            float targetWeather = env != null ? Mathf.Clamp01(env.Intensity) : 0f;
+            _density = Mathf.MoveTowards(_density, targetDensity, Time.deltaTime * 0.6f);
+            _weather = Mathf.MoveTowards(_weather, targetWeather, Time.deltaTime * 0.7f);
+
+            _mat.SetFloat(BrightnessId, _brightness);
+            _mat.SetFloat(DensityId, _density);
+            _mat.SetFloat(WeatherId, _weather);
+        }
+
+        private void OnDestroy()
+        {
+            if (_mat != null)
+            {
+                Destroy(_mat);
+            }
+
+            if (_mesh != null)
+            {
+                Destroy(_mesh);
+            }
         }
 
         /// <summary>A unit UV-sphere dome (positions only — the shader derives the view direction from them).</summary>

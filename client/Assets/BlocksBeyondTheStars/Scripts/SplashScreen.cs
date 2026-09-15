@@ -9,7 +9,7 @@ namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
     /// Splash screen (`anf_textures.md` §3): the animated menu space scene shows through behind an
-    /// extruded ("3D"-looking) BLOCKS BEYOND THE STARS title that fades/scales/slides in, with a tagline, build
+    /// extruded ("3D"-looking) VOIDCRAFT title that fades/scales/slides in, with a tagline, build
     /// badge and skip hint. Shown every start, skippable, and bridges content-load time. Modern uGUI
     /// build on its own DPI-scaled overlay canvas (no bundled art needed); driven from AppShell.Update.
     /// </summary>
@@ -114,7 +114,7 @@ namespace BlocksBeyondTheStars.Client
             _title.sizeDelta = new Vector2(1100f, 160f);
             _titleGroup = titleGo.AddComponent<CanvasGroup>();
 
-            const string title = "BLOCKS BEYOND THE STARS";
+            const string title = "VOIDCRAFT";
             var glow = new Color(0.22f, 0.75f, 0.95f, 0.3f);
             Centered(_title, new Vector2(-5f, 0f), 72, glow, title, true);
             Centered(_title, new Vector2(5f, 0f), 72, glow, title, true);

@@ -80,6 +80,10 @@ internal sealed class MonumentInstance
     /// <summary>Which silhouette this is — one of <see cref="MonumentGenerator.Archetypes"/>. Also the
     /// scan ledger's subject, so a player is rewarded once per archetype per body.</summary>
     public string Archetype { get; set; } = string.Empty;
+
+    public Vector3i? SurfaceContact { get; set; }
+    public Vector3i? BuriedContact { get; set; }
+    public Vector3i? RepairSocket { get; set; }
 }
 
 /// <summary>

@@ -202,14 +202,24 @@ public sealed class ServerWorld
             return System.Array.Empty<ChunkCoord>();
         }
 
-        int keepSq = keepRadius * keepRadius;
+        double keepSq = (double)keepRadius * keepRadius;
         var toRemove = new List<ChunkCoord>();
         foreach (var coord in _loaded.Keys)
         {
             bool near = false;
             foreach (var anchor in anchors)
             {
-                if (coord.DistanceSquared(anchor) <= keepSq)
+                // The streamer stores canonical keys across both horizontal seams. Raw index distance
+                // would evict the visible opposite-side chunks every sweep, clear their SentChunks entries,
+                // and force an unchanged stationary scene to regenerate, resend and remesh every ten seconds.
+                // Convert to block units for the shared wrap helpers, then back to the existing chunk-radius
+                // metric. Height stays linear; a distant underground/sky chunk must still be evicted.
+                double dx = WorldConstants.WrapDeltaX(((double)coord.X - anchor.X) * WorldConstants.ChunkSize,
+                    Circumference) / WorldConstants.ChunkSize;
+                double dz = WorldConstants.WrapDeltaZ(((double)coord.Z - anchor.Z) * WorldConstants.ChunkSize,
+                    Circumference) / WorldConstants.ChunkSize;
+                double dy = (double)coord.Y - anchor.Y;
+                if (dx * dx + dy * dy + dz * dz <= keepSq)
                 {
                     near = true;
                     break;

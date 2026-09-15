@@ -259,6 +259,9 @@ public sealed partial class GameServer
             Max = new Vector3i(p.Origin.X + s.Width, p.GroundY + s.Height, p.Origin.Z + s.Length),
             Center = new Vector3f(p.Origin.X + s.Width / 2f, p.GroundY + 1, p.Origin.Z + s.Length / 2f),
             Archetype = archetype,
+            SurfaceContact = SurveyMarker(p, "survey_surface"),
+            BuriedContact = SurveyMarker(p, "survey_contact"),
+            RepairSocket = SurveyMarker(p, "survey_socket"),
         });
 
         foreach (var m in s.Markers)
@@ -279,8 +282,9 @@ public sealed partial class GameServer
     /// lays NO foundation plate: only the columns that actually carry stone are cleared above and filled
     /// below, so the relic sits in the landscape instead of on a paved square. Must run inside a repo
     /// transaction.</summary>
-    private void StampMonumentBlocks(PlacedSettlement p)
+    private int StampMonumentBlocks(PlacedSettlement p, int surveyGeometryVersion = 0)
     {
+        int cellOperations = 0;
         var s = p.Structure;
         var planet = _world.Planet;
         int gy = p.GroundY;
@@ -305,12 +309,16 @@ public sealed partial class GameServer
                     continue; // nothing stands in this column — leave the terrain exactly as it is
                 }
 
+                // The survey stair has floor cells but intentionally no roof; carve its standing space.
+                if (p.Name == "veyl_anchor")
+                    top = System.Math.Max(top, VeylSurveyGenerator.MinimumCarveHeight(surveyGeometryVersion, x, z));
                 int wx = origin.X + x, wz = origin.Z + z;
 
                 // Clear the terrain the relic occupies, then stamp its cells (air cells inside the volume are
                 // left as air so an arch's opening is genuinely open).
                 for (int y = 0; y <= top; y++)
                 {
+                    cellOperations++;
                     ushort b = s.Get(x, y, z);
                     var pos = new Vector3i(wx, gy + y, wz);
                     if (b == 0)
@@ -335,10 +343,12 @@ public sealed partial class GameServer
                 int floorY = System.Math.Max(colSurf + 1, gy - MonumentPlinthDepth);
                 for (int y = gy - 1; y >= floorY; y--)
                 {
+                    cellOperations++;
                     _world.SetBlock(new Vector3i(wx, y, wz), new BlockId(foot));
                 }
             }
         }
+        return cellOperations;
     }
 
     /// <summary>The monument a player standing at <paramref name="pos"/> is at, or null. Used by the scanner
@@ -350,10 +360,11 @@ public sealed partial class GameServer
         float bestSq = MonumentScanReach * MonumentScanReach;
         foreach (var m in _monuments)
         {
-            // Gap between the player and the monument's box (0 while inside it), longitude-wrap aware.
+            // Gap between the player and the monument's box (0 while inside it), wrap-aware on both axes.
             float relX = WorldConstants.WrapDeltaX((int)pos.X - m.Min.X, circ);
+            float relZ = (float)WorldConstants.WrapDeltaZ((double)pos.Z - m.Min.Z, circ);
             float dx = Gap(relX, 0, m.Max.X - m.Min.X);
-            float dz = Gap(pos.Z, m.Min.Z, m.Max.Z);
+            float dz = Gap(relZ, 0, m.Max.Z - m.Min.Z);
             float dy = Gap(pos.Y, m.Min.Y - 4, m.Max.Y + 4); // a relic is scannable from its foot and its top
             float d = (dx * dx) + (dy * dy) + (dz * dz);
             if (d < bestSq)

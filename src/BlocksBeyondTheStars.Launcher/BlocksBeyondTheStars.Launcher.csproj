@@ -8,8 +8,8 @@
     <Nullable>enable</Nullable>
     <AssemblyName>BlocksBeyondTheStars.Launcher</AssemblyName>
     <RootNamespace>BlocksBeyondTheStars.Launcher</RootNamespace>
-    <Product>Blocks Beyond the Stars</Product>
-    <AssemblyTitle>Blocks Beyond the Stars Launcher</AssemblyTitle>
+    <Product>Voidcraft</Product>
+    <AssemblyTitle>Voidcraft Launcher</AssemblyTitle>
     <Version>0.1.0</Version>
     <!-- Same icon as the game exe (generated from client/.../Icon/app_icon.png via artifacts/make-icon.ps1). -->
     <ApplicationIcon>app_icon.ico</ApplicationIcon>

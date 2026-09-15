@@ -7,6 +7,7 @@ using BlocksBeyondTheStars.Networking.Transport;
 using BlocksBeyondTheStars.Persistence;
 using BlocksBeyondTheStars.Shared.Configuration;
 using BlocksBeyondTheStars.Shared.Content;
+using BlocksBeyondTheStars.Shared.Geometry;
 using Xunit;
 using SvGameServer = BlocksBeyondTheStars.GameServer.GameServer;
 
@@ -113,12 +114,19 @@ public sealed class ShipInteriorTests : IDisposable
         var server = Started(out var repo);
         using (repo)
         {
-            server.AddLocalPlayer("Pilot");
+            var pilot = server.AddLocalPlayer("Pilot");
             server.EnterSpace("Pilot");
             server.EnterShipInterior("Pilot");
             Assert.True(server.InShipInterior("Pilot"));
 
-            // The cockpit is the helm while floating in space — using it flies again.
+            // The medical bay is now a separate room position, outside the helm's 3 m reach.
+            // Merely being aboard must not let the player use a distant station.
+            server.UseStation("Pilot", "cockpit");
+            Assert.True(server.InShipInterior("Pilot"));
+            var cockpit = Assert.IsType<Vector3f>(server.StationPosition("cockpit"));
+            pilot.State.Position = cockpit + new Vector3f(0f, 0f, -1.5f); // stand in the clear cockpit approach
+
+            // The cockpit is the helm while floating in space — using it from the approach flies again.
             server.UseStation("Pilot", "cockpit");
             Assert.True(server.InSpace("Pilot"));
             Assert.False(server.InShipInterior("Pilot"));

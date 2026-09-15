@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // This file is part of Blocks Beyond the Stars. See LICENSE for the full AGPL-3.0 text.
 using System.Collections.Generic;
+using System.Globalization;
 using BlocksBeyondTheStars.Networking.Messages;
 using UnityEngine;
 
@@ -34,6 +35,7 @@ namespace BlocksBeyondTheStars.Client
             public string Kind;
             public Vector3 World;          // canonical world pos (gap centre, floor)
             public float Width;
+            public bool AxisX;
             public bool Open;
             public float Anim;             // 0 closed → 1 open, eased toward Open
             public Transform Field;        // energy door: the translucent blue field shown in the open doorway
@@ -53,21 +55,33 @@ namespace BlocksBeyondTheStars.Client
                 _subscribed = true;
             }
 
+            AdvanceDoors(Time.deltaTime);
+        }
+
+        private void AdvanceDoors(float deltaTime)
+        {
             foreach (var d in _doors.Values)
             {
                 d.Go.transform.position = Game != null ? Game.ScenePos(d.World.x, d.World.y, d.World.z) : d.World;
 
                 float target = d.Open ? 1f : 0f;
-                d.Anim = Mathf.MoveTowards(d.Anim, target, Time.deltaTime * AnimSpeed);
+                d.Anim = Mathf.MoveTowards(d.Anim, target, deltaTime * AnimSpeed);
                 Animate(d);
 
-                // The collider blocks passage until the door is mostly open (so you can't slip through a crack).
+                // Use the actual opening, including panel thickness, rather than one animation fraction
+                // for both a one-meter door and a three-meter ship hatch.
                 if (d.Collider != null)
                 {
-                    d.Collider.enabled = d.Anim < 0.5f;
+                    d.Collider.enabled = !HasPassageClearance(d.Kind, d.Width, d.Anim);
                 }
             }
         }
+
+        /// <summary>True only after the received open state has animated far enough for this view's real
+        /// blocking collider to be disabled. Callers that drive an observed physical route must not treat the
+        /// server state alone as proof that the local passage is already clear.</summary>
+        internal bool IsPassageClear(int doorId)
+            => _doors.TryGetValue(doorId, out var door) && door.Collider != null && !door.Collider.enabled;
 
         /// <summary>Door kinds that swing on a single leaf and are opened by hand with E. The wooden door is the
         /// cheap early-game variant of the hinge door, so it looks and behaves the same way — only the material
@@ -94,8 +108,8 @@ namespace BlocksBeyondTheStars.Client
             // open doorway shows a passable blue membrane (item 35).
             if (d.FieldMat != null)
             {
-                float shimmer = 0.85f + 0.15f * Mathf.Sin(Time.time * 6f);
-                float alpha = 0.42f * d.Anim * shimmer;
+                float shimmer = UiKit.ReducedMotion ? 1f : 0.96f + 0.04f * Mathf.Sin(Time.time * 1.8f);
+                float alpha = 0.16f * d.Anim * shimmer;
                 d.FieldMat.SetColor(FieldColorId, ShaderColor.Srgb(new Color(0.35f, 0.80f, 1f, alpha)));
             }
         }
@@ -106,7 +120,18 @@ namespace BlocksBeyondTheStars.Client
             foreach (var nd in m.Doors)
             {
                 seen.Add(nd.Id);
-                if (!_doors.TryGetValue(nd.Id, out var d))
+                _doors.TryGetValue(nd.Id, out var d);
+                // Server registries reuse IDs after ship arrivals/removals and world changes. A reused
+                // number must not keep the previous doorway's transform, shape or collider.
+                if (d != null && (d.Kind != nd.Kind || d.AxisX != nd.AxisX || !Mathf.Approximately(d.Width, Mathf.Max(1f, nd.Width))
+                    || d.World != new Vector3(nd.X, nd.Y, nd.Z)))
+                {
+                    DestroyDoor(d);
+                    _doors.Remove(nd.Id);
+                    d = null;
+                }
+
+                if (d == null)
                 {
                     d = Build(nd);
                     _doors[nd.Id] = d;
@@ -132,7 +157,7 @@ namespace BlocksBeyondTheStars.Client
 
                 foreach (var id in stale)
                 {
-                    Destroy(_doors[id].Go);
+                    DestroyDoor(_doors[id]);
                     _doors.Remove(id);
                 }
             }
@@ -141,7 +166,8 @@ namespace BlocksBeyondTheStars.Client
         private Door Build(NetDoor nd)
         {
             var go = new GameObject($"Door {nd.Kind} {nd.Id}");
-            go.transform.SetParent(transform, true);
+            go.transform.SetParent(transform, false);
+            go.transform.position = Game != null ? Game.ScenePos(nd.X, nd.Y, nd.Z) : new Vector3(nd.X, nd.Y, nd.Z);
 
             // Build everything in an X-aligned frame (wall runs along local X); rotate 90° for a Z wall.
             var pivot = new GameObject("Pivot").transform;
@@ -151,33 +177,22 @@ namespace BlocksBeyondTheStars.Client
             float w = Mathf.Max(1f, nd.Width);
             bool hinge = IsHinged(nd.Kind);
             bool wood = nd.Kind == "wood";
-            // The wooden door reads as lighter, warmer planks so it is telling apart from the metal hinge door.
-            Color panelCol = wood ? new Color(0.58f, 0.40f, 0.22f)
-                : hinge ? new Color(0.45f, 0.30f, 0.16f) : new Color(0.62f, 0.69f, 0.78f);
-            Color trimCol = wood ? new Color(0.38f, 0.25f, 0.13f)
-                : hinge ? new Color(0.30f, 0.19f, 0.10f) : new Color(0.30f, 0.85f, 0.95f);
-
             Transform a, b = null;
             if (hinge)
             {
-                // One leaf, pivoting on the left jamb. The pivot sits at the jamb; the leaf extends +X from it.
-                a = new GameObject("Leaf").transform;
+                a = new GameObject("LeafPivot").transform;
                 a.SetParent(pivot, false);
                 a.localPosition = new Vector3(-w * 0.5f, 0f, 0f);
-                var leaf = Panel(panelCol, trimCol);
-                leaf.transform.SetParent(a, false);
+                var leaf = BuildPanel(a, w * 0.96f, wood, true);
                 leaf.transform.localPosition = new Vector3(w * 0.5f, Height * 0.5f, 0f);
-                leaf.transform.localScale = new Vector3(w * 0.96f, Height, Thickness);
             }
             else
             {
-                a = MakePanel(pivot, panelCol, trimCol, w * 0.5f);
-                b = MakePanel(pivot, panelCol, trimCol, w * 0.5f);
+                a = BuildPanel(pivot, w * 0.49f, wood, false).transform;
+                b = BuildPanel(pivot, w * 0.49f, wood, false).transform;
             }
 
-            // Frame trim: two jamb posts (sci-fi doors glow) so the opening reads as a real doorway.
-            Post(pivot, trimCol, -w * 0.5f);
-            Post(pivot, trimCol, w * 0.5f);
+            BuildFrame(pivot, w, wood);
 
             // A solid collider that blocks the player while closed (the player uses a CharacterController).
             var col = go.AddComponent<BoxCollider>();
@@ -192,16 +207,18 @@ namespace BlocksBeyondTheStars.Client
             if (nd.Kind == "energy")
             {
                 var fieldGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                var fieldLease = fieldGo.AddComponent<EquipmentGeometryLease>();
                 StripCollider(fieldGo);
                 fieldGo.transform.SetParent(pivot, false);
                 fieldGo.transform.localPosition = new Vector3(0f, Height * 0.5f, 0f);
                 fieldGo.transform.localScale = new Vector3(w * 0.98f, Height, 0.05f);
                 fieldMat = EnergyFieldMaterial();
+                fieldLease.OwnedResource = fieldMat;
                 fieldGo.GetComponent<Renderer>().sharedMaterial = fieldMat;
                 field = fieldGo.transform;
             }
 
-            return new Door
+            var door = new Door
             {
                 Go = go,
                 Pivot = pivot,
@@ -211,11 +228,15 @@ namespace BlocksBeyondTheStars.Client
                 Kind = nd.Kind,
                 World = new Vector3(nd.X, nd.Y, nd.Z),
                 Width = w,
+                AxisX = nd.AxisX,
                 Open = nd.Open,
                 Anim = nd.Open ? 1f : 0f,
                 Field = field,
                 FieldMat = fieldMat,
             };
+            Animate(door);
+            col.enabled = !HasPassageClearance(door.Kind, w, door.Anim);
+            return door;
         }
 
         private static readonly int FieldColorId = Shader.PropertyToID("_Color");
@@ -237,59 +258,98 @@ namespace BlocksBeyondTheStars.Client
             return mat;
         }
 
-        private Transform MakePanel(Transform parent, Color body, Color trim, float panelWidth)
+        /// <summary>Conservative center-passage width for the existing player capsule plus skin padding.</summary>
+        internal static bool HasPassageClearance(string kind, float width, float animation)
         {
-            var holder = new GameObject("Panel").transform;
-            holder.SetParent(parent, false);
-            var panel = Panel(body, trim);
-            panel.transform.SetParent(holder, false);
-            panel.transform.localScale = new Vector3(panelWidth * 0.98f, Height, Thickness);
-            return holder;
-        }
-
-        /// <summary>A single panel cube with a thin emissive trim strip (the sci-fi glow / wood edge).</summary>
-        private GameObject Panel(Color body, Color trim)
-        {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            StripCollider(go);
-            Paint(go, body);
-
-            var strip = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            StripCollider(strip);
-            Paint(strip, trim);
-            strip.transform.SetParent(go.transform, false);
-            strip.transform.localScale = new Vector3(0.12f, 0.9f, 1.05f); // a vertical light seam down the middle
-            return go;
-        }
-
-        private void Post(Transform parent, Color trim, float x)
-        {
-            var post = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            StripCollider(post);
-            Paint(post, trim);
-            post.transform.SetParent(parent, false);
-            post.transform.localPosition = new Vector3(x, Height * 0.5f, 0f);
-            post.transform.localScale = new Vector3(0.14f, Height + 0.1f, Thickness * 2.2f);
-        }
-
-        private static Shader _doorShader;
-
-        private static void Paint(GameObject go, Color c)
-        {
-            var r = go.GetComponent<Renderer>();
-            if (r == null)
+            const float requiredWidth = 0.78f; // WorldRig: 2 * (radius 0.35 + skin 0.03), plus 2 cm clearance.
+            float w = Mathf.Max(1f, width);
+            float t = Mathf.Clamp01(animation);
+            float opening;
+            if (IsHinged(kind))
             {
-                return;
+                float angle = t * 96f * Mathf.Deg2Rad;
+                // Past 90 degrees the leaf is outside the aperture, while its thickness still protrudes.
+                // The leaf ends at 98% of the aperture from its pivot, including its 2% hinge offset.
+                // Its handles reach 0.1675 m from the panel plane, so include that visible thickness.
+                float leafProjection = Mathf.Max(0f, w * 0.98f * Mathf.Cos(angle)) + 0.17f * Mathf.Sin(angle);
+                opening = w - leafProjection;
+            }
+            else
+            {
+                opening = Mathf.Min(w - 0.01f, w * (0.01f + 0.92f * t));
             }
 
-            // Use a project shader (always in the build); the primitives' default Standard material gets
-            // stripped from player builds and renders bright pink/magenta.
-            if (_doorShader == null)
-            {
-                _doorShader = Shader.Find("BlocksBeyondTheStars/LitColor") ?? Shader.Find("Unlit/Color");
-            }
+            return opening >= requiredWidth;
+        }
 
-            r.sharedMaterial = new Material(_doorShader) { color = ShaderColor.Srgb(c) };
+        private static GameObject BuildPanel(Transform parent, float width, bool wood, bool hinge)
+        {
+            string key = "door:panel:" + width.ToString("R", CultureInfo.InvariantCulture) + ":" + wood + ":" + hinge;
+            return EquipmentGeometry.Create(parent, "DoorPanel", key, Color.white, b =>
+            {
+                b.Box(Vector3.zero, new Vector3(width, Height, Thickness),
+                    wood ? EquipmentGeometry.Finish.Fabric : EquipmentGeometry.Finish.Graphite, 0.020f);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    float z = side * (Thickness * 0.5f + 0.004f);
+                    var front = side < 0 ? Quaternion.identity : Quaternion.Euler(0f, 180f, 0f);
+                    if (wood)
+                    {
+                        for (int i = 1; i < 4; i++)
+                        {
+                            b.Box(new Vector3(-width * 0.5f + width * i / 4f, 0f, z), new Vector3(0.012f, Height - 0.12f, 0.01f), EquipmentGeometry.Finish.Rubber, 0.002f);
+                        }
+                    }
+                    else
+                    {
+                        b.Box(new Vector3(0f, 0.38f, z), new Vector3(width - 0.055f, 1.77f, 0.025f), EquipmentGeometry.Finish.Ceramic, 0.009f);
+                        b.Box(new Vector3(0f, -0.965f, z), new Vector3(width - 0.055f, 0.70f, 0.025f), EquipmentGeometry.Finish.Ceramic, 0.009f);
+                        b.Box(new Vector3(0f, -0.52f, z), new Vector3(width - 0.075f, 0.085f, 0.030f), EquipmentGeometry.Finish.Steel, 0.010f);
+                        b.Signal(new Vector3(-width * 0.32f, 0.48f, side * 0.109f), new Vector2(0.010f, 0.76f), new Color(0.36f, 0.80f, 0.91f), front);
+                        b.Box(new Vector3(width * 0.23f, -1.03f, side * 0.110f), new Vector3(width * 0.14f, 0.17f, 0.008f), EquipmentGeometry.Finish.Orange, 0.003f);
+                    }
+
+                    if (hinge)
+                    {
+                        b.Box(new Vector3(width * 0.34f, -0.10f, side * 0.14f), new Vector3(0.045f, 0.21f, 0.055f), EquipmentGeometry.Finish.Graphite, 0.012f);
+                    }
+                }
+            });
+        }
+
+        private static void BuildFrame(Transform parent, float width, bool wood)
+        {
+            string key = "door:frame:" + width.ToString("R", CultureInfo.InvariantCulture) + ":" + wood;
+            EquipmentGeometry.Create(parent, "AirlockFrame", key, Color.white, b =>
+            {
+                var finish = wood ? EquipmentGeometry.Finish.Fabric : EquipmentGeometry.Finish.Graphite;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    float x = side * (width * 0.5f + 0.046f);
+                    b.Box(new Vector3(x, Height * 0.5f, 0f), new Vector3(0.10f, Height + 0.10f, 0.29f), finish, 0.017f);
+                    if (!wood)
+                    {
+                        b.Box(new Vector3(x, Height * 0.5f, -0.153f), new Vector3(0.062f, Height - 0.04f, 0.020f), EquipmentGeometry.Finish.Ceramic, 0.008f);
+                        b.Box(new Vector3(x, 0.18f, -0.17f), new Vector3(0.075f, 0.17f, 0.019f), EquipmentGeometry.Finish.Orange, 0.008f);
+                    }
+                }
+
+                b.Box(new Vector3(0f, Height + 0.063f, 0f), new Vector3(width + 0.19f, 0.12f, 0.31f), finish, 0.023f);
+                if (!wood)
+                {
+                    b.Signal(new Vector3(0f, Height + 0.052f, -0.158f), new Vector2(Mathf.Min(width * 0.38f, 0.70f), 0.013f), new Color(0.94f, 0.63f, 0.31f));
+                }
+            });
+        }
+
+        private static void DestroyDoor(Door door)
+        {
+            if (door.Go != null)
+            {
+                // Stop the stale collider immediately while Unity waits to destroy the old object.
+                door.Go.SetActive(false);
+                EquipmentGeometry.DestroyResource(door.Go);
+            }
         }
 
         private static void StripCollider(GameObject go)
@@ -297,7 +357,8 @@ namespace BlocksBeyondTheStars.Client
             var c = go.GetComponent<Collider>();
             if (c != null)
             {
-                Destroy(c);
+                c.enabled = false;
+                EquipmentGeometry.DestroyResource(c);
             }
         }
 

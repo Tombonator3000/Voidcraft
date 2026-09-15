@@ -7,16 +7,13 @@ using UnityEngine;
 namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
-    /// A block texture atlas generated **procedurally in code** (M27) — no bundled image assets.
-    /// Each block gets a 32×32 tile painted from its base colour plus per-block detail (grain,
-    /// ore speckles, metal panel + rivets, ice/glass streaks, a circuit grid, grass/flora blades,
-    /// crystal facets, water wave crests, glowing lava veins), with a darker edge so blocks read
-    /// as tiled. The chunk mesher UV-maps faces into this atlas.
+    /// Shared block atlas with concept materials, bundled texture fallbacks and stable tile identities.
+    /// Authored colour, relief, roughness and emission are independent; world blocks remain editable.
     /// </summary>
     public sealed class BlockTextureAtlas
     {
-        public const int Tile = 64;
-        // 16x16 = 256 tile slots (1024x1024 atlas). data/blocks.json already has 80 blocks; the old 8x8 = 64
+        public const int Tile = 128;
+        // 16x16 = 256 tile slots (2048x2048 atlas). data/blocks.json already has 80 blocks; the old 8x8 = 64
         // slots silently left every block with id >= 64 (the newer flora + doors) untextured — a grey, alpha-
         // less tile, which also broke their cutout leaves. Keep this comfortably above the block count.
         public const int Cols = 16;
@@ -24,16 +21,25 @@ namespace BlocksBeyondTheStars.Client
 
         public Texture2D Texture { get; }
 
-        /// <summary>A tangent-space normal map derived from the colour atlas (Sobel on luminance), so flat
-        /// block faces catch the light with micro-relief (cracks, rivets, grain). Same tile layout as
-        /// <see cref="Texture"/>; the block shader samples it for per-pixel lighting. The ALPHA channel
-        /// carries a cavity/crevice AO (steep luminance edges → darker) the shader multiplies into the
-        /// diffuse for texture-scale depth.</summary>
+        /// <summary>Tangent-space normals in RGB, subtle physical cavity occlusion in alpha.</summary>
         public Texture2D NormalTexture { get; private set; }
+
+        /// <summary>Linear material data: R roughness, G metallic, B emission aperture,
+        /// A = 0.5 + height / 2 for authored tiles, or zero for legacy material fallback.</summary>
+        public Texture2D SurfaceTexture { get; private set; }
+
+        /// <summary>Binds all atlas maps, including the opt-in flag used by the parallax shader.</summary>
+        public void BindMaterial(Material material)
+        {
+            material.mainTexture = Texture;
+            material.SetTexture("_NormalTex", NormalTexture);
+            material.SetTexture("_SurfaceTex", SurfaceTexture);
+            material.SetFloat("_SurfaceMapsEnabled", 1f);
+        }
 
         /// <summary>Frees the atlas textures. Unity never garbage-collects <c>Texture2D</c>s created via
         /// <c>new</c>, so the owner (GameBootstrap / MenuBackground) must call this when it is destroyed —
-        /// otherwise every menu↔world cycle permanently leaks both full atlases (#423).</summary>
+        /// otherwise every menu↔world cycle permanently leaks atlas textures (#423).</summary>
         public void Destroy()
         {
             if (Texture != null)
@@ -46,15 +52,30 @@ namespace BlocksBeyondTheStars.Client
                 UnityEngine.Object.Destroy(NormalTexture);
                 NormalTexture = null;
             }
+            if (SurfaceTexture != null)
+            {
+                UnityEngine.Object.Destroy(SurfaceTexture);
+                SurfaceTexture = null;
+            }
         }
 
         public BlockTextureAtlas(GameContent content)
         {
             Texture = new Texture2D(Cols * Tile, Rows * Tile, TextureFormat.RGBA32, mipChain: true)
             {
-                filterMode = FilterMode.Point,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4,
                 wrapMode = TextureWrapMode.Clamp,
             };
+
+            SurfaceTexture = new Texture2D(Cols * Tile, Rows * Tile, TextureFormat.RGBA32, mipChain: true, linear: true)
+            {
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            // Unauthored tiles explicitly opt out; uninitialised texture memory is not a sentinel.
+            SurfaceTexture.SetPixels32(new Color32[Cols * Tile * Rows * Tile]);
 
             foreach (var b in content.Blocks.Values)
             {
@@ -68,7 +89,8 @@ namespace BlocksBeyondTheStars.Client
             BuildVariants(content);
             BuildCapTiles(content);
             Texture.Apply(updateMipmaps: true);
-            BuildNormalAtlas(); // derives from the final atlas, so variants get normals automatically
+            SurfaceTexture.Apply(updateMipmaps: true);
+            BuildNormalAtlas();
         }
 
         /// <summary>Natural blocks whose visible tiling is broken with procedural variant tiles
@@ -327,6 +349,18 @@ namespace BlocksBeyondTheStars.Client
             int sx = (baseId % Cols) * Tile, sy = (baseId / Cols) * Tile;
             int dx = (slot % Cols) * Tile, dy = (slot / Cols) * Tile;
             var px = Texture.GetPixels(sx, sy, Tile, Tile);
+            var surfaces = SurfaceTexture.GetPixels(sx, sy, Tile, Tile);
+            if (surfaces[0].a >= 0.5f)
+            {
+                float tint = variant == 0 ? 0.96f : 1.04f;
+                for (int i = 0; i < px.Length; i++)
+                {
+                    px[i] = new Color(px[i].r * tint, px[i].g * tint, px[i].b * tint, px[i].a);
+                }
+                Texture.SetPixels(dx, dy, Tile, Tile, px);
+                SurfaceTexture.SetPixels(dx, dy, Tile, Tile, surfaces);
+                return;
+            }
             var rng = new System.Random(baseId * 31 + variant);
 
             static Color Scale(Color c, float k)
@@ -342,14 +376,14 @@ namespace BlocksBeyondTheStars.Client
                     px[i] = Scale(px[i], 0.96f);
                 }
 
-                for (int c = 0; c < 3; c++)
+                for (int c = 0; c < 1; c++)
                 {
                     int x = rng.Next(Tile), y = rng.Next(Tile);
                     int steps = Tile / 2 + rng.Next(Tile / 2);
                     for (int s = 0; s < steps; s++)
                     {
                         px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)] =
-                            Scale(px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)], 0.70f);
+                            Scale(px[Mathf.Clamp(y, 0, Tile - 1) * Tile + Mathf.Clamp(x, 0, Tile - 1)], 0.82f);
                         x += rng.Next(3) - 1;
                         y += rng.Next(3) - 1;
                     }
@@ -363,60 +397,66 @@ namespace BlocksBeyondTheStars.Client
                     px[i] = Scale(px[i], 1.06f);
                 }
 
-                for (int s = 0; s < 30; s++)
+                for (int s = 0; s < 8; s++)
                 {
                     int x = rng.Next(Tile - 1), y = rng.Next(Tile - 1);
                     float k = rng.Next(2) == 0 ? 0.72f : 1.18f;
                     px[y * Tile + x] = Scale(px[y * Tile + x], k);
-                    px[y * Tile + x + 1] = Scale(px[y * Tile + x + 1], k);
-                    px[(y + 1) * Tile + x] = Scale(px[(y + 1) * Tile + x], k);
+                    if (rng.Next(3) == 0)
+                    {
+                        px[y * Tile + x + 1] = Scale(px[y * Tile + x + 1], k);
+                    }
                 }
             }
 
             Texture.SetPixels(dx, dy, Tile, Tile, px);
         }
 
-        /// <summary>Derives the normal atlas from the finished colour atlas: per pixel, the luminance
-        /// gradient (Sobel) becomes a surface normal (treating brighter = higher), encoded in RGB.</summary>
+        /// <summary>Physical height drives authored normals. Legacy textures retain restrained relief.
+        /// Derivatives never sample an adjacent tile, preventing unrelated seams at atlas boundaries.</summary>
         private void BuildNormalAtlas()
         {
             int w = Cols * Tile, h = Rows * Tile;
-            // linear: normals are data, not colour — without this flag a Linear-color-space build would
-            // sRGB-decode the encoded normals on sample and break the per-pixel lighting on every block.
             NormalTexture = new Texture2D(w, h, TextureFormat.RGBA32, mipChain: true, linear: true)
             {
-                filterMode = FilterMode.Point,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4,
                 wrapMode = TextureWrapMode.Clamp,
             };
+            var src = Texture.GetPixels32();
+            var surface = SurfaceTexture.GetPixels32();
+            var dst = new Color32[w * h];
 
-            var src = Texture.GetPixels();
-            var dst = new Color[w * h];
-            const float strength = 1.6f;
-
-            float Lum(int x, int y)
+            float Height(int x, int y, bool authored)
             {
-                x = x < 0 ? 0 : (x >= w ? w - 1 : x);
-                y = y < 0 ? 0 : (y >= h ? h - 1 : y);
-                var c = src[y * w + x];
-                return c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
+                int index = y * w + x;
+                if (authored)
+                {
+                    return surface[index].a / 255f * 2f - 1f;
+                }
+                var c = src[index];
+                return (c.r * 0.299f + c.g * 0.587f + c.b * 0.114f) / 255f;
             }
 
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
                 {
-                    float dx = Lum(x + 1, y) - Lum(x - 1, y);
-                    float dy = Lum(x, y + 1) - Lum(x, y - 1);
+                    int index = y * w + x;
+                    bool authored = surface[index].a >= 127;
+                    int left = x % Tile == 0 ? x : x - 1;
+                    int right = x % Tile == Tile - 1 ? x : x + 1;
+                    int below = y % Tile == 0 ? y : y - 1;
+                    int above = y % Tile == Tile - 1 ? y : y + 1;
+                    float dx = Height(right, y, authored) - Height(left, y, authored);
+                    float dy = Height(x, above, authored) - Height(x, below, authored);
+                    float strength = authored ? 2.4f : 0.55f;
                     var n = new Vector3(-dx * strength, -dy * strength, 1f).normalized;
-                    // Cavity/crevice AO packed into the (otherwise unused) alpha: steep luminance edges —
-                    // painted cracks, seams, rivets, grain — read as shallow pits, so the block shader can
-                    // darken them a touch for texture-scale depth on top of the per-vertex AO.
-                    float cav = Mathf.Clamp01(1f - Mathf.Sqrt(dx * dx + dy * dy) * 2.0f);
-                    dst[y * w + x] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, cav);
+                    float cavity = authored ? Mathf.Lerp(0.86f, 1f, Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.3f, 0.65f, Height(x, y, true)))) : 1f;
+                    dst[index] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, cavity);
                 }
             }
-
-            NormalTexture.SetPixels(dst);
+            NormalTexture.SetPixels32(dst);
             NormalTexture.Apply(updateMipmaps: true);
         }
 
@@ -460,6 +500,25 @@ namespace BlocksBeyondTheStars.Client
         private void PaintTile(int id, string key)
         {
             int ox = (id % Cols) * Tile, oy = (id / Cols) * Tile;
+
+            if (BlockSurfaceLibrary.Contains(key))
+            {
+                var colours = new Color32[Tile * Tile];
+                var surfaces = new Color32[Tile * Tile];
+                for (int y = 0; y < Tile; y++)
+                {
+                    for (int x = 0; x < Tile; x++)
+                    {
+                        var sample = BlockSurfaceLibrary.Sample(key, (x + 0.5f) / Tile, (y + 0.5f) / Tile);
+                        colours[y * Tile + x] = sample.Albedo;
+                        surfaces[y * Tile + x] = new Color(sample.Roughness, sample.Metallic,
+                            sample.Emission, 0.5f + sample.Height * 0.5f);
+                    }
+                }
+                Texture.SetPixels32(ox, oy, Tile, Tile, colours);
+                SurfaceTexture.SetPixels32(ox, oy, Tile, Tile, surfaces);
+                return;
+            }
 
             // Prefer a generated block texture (Resources/textures/<key>.bytes); fall back to the
             // procedural tile when none is bundled.
@@ -517,15 +576,31 @@ namespace BlocksBeyondTheStars.Client
         private bool TryPaintFromAsset(string key, int ox, int oy)
         {
             var asset = Resources.Load<TextAsset>("textures/" + key);
-            if (asset == null || asset.bytes.Length != Tile * Tile * 4)
+            if (asset == null)
+            {
+                return false;
+            }
+            int size = Mathf.RoundToInt(Mathf.Sqrt(asset.bytes.Length / 4f));
+            if ((size != 64 && size != Tile) || asset.bytes.Length != size * size * 4)
             {
                 return false;
             }
 
-            var src = new Texture2D(Tile, Tile, TextureFormat.RGBA32, false);
+            var src = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+            };
             src.LoadRawTextureData(asset.bytes);
             src.Apply();
-            Texture.SetPixels(ox, oy, Tile, Tile, src.GetPixels());
+            var pixels = new Color[Tile * Tile];
+            for (int y = 0; y < Tile; y++)
+            {
+                for (int x = 0; x < Tile; x++)
+                {
+                    pixels[y * Tile + x] = src.GetPixelBilinear((x + 0.5f) / Tile, (y + 0.5f) / Tile);
+                }
+            }
+            Texture.SetPixels(ox, oy, Tile, Tile, pixels);
             Object.Destroy(src);
             return true;
         }
@@ -1061,9 +1136,11 @@ namespace BlocksBeyondTheStars.Client
 
         private static Color BaseColor(string key) => key switch
         {
-            "stone" => new Color(0.55f, 0.55f, 0.57f),
+            // Quiet graphite stone keeps large rocky mesas cool; the amber contrast comes from the star and
+            // authored signal/lamps rather than from every terrain face.
+            "stone" => new Color(0.46f, 0.47f, 0.52f),
             "dirt" => new Color(0.45f, 0.32f, 0.20f),
-            "basalt" => new Color(0.24f, 0.24f, 0.27f),
+            "basalt" => new Color(0.22f, 0.23f, 0.28f),
             "obsidian" => new Color(0.10f, 0.07f, 0.14f), // glassy black with a violet cast (#477)
             "ice" => new Color(0.70f, 0.85f, 0.95f),
             "iron_ore" => new Color(0.58f, 0.50f, 0.46f),

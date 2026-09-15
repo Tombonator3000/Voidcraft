@@ -17,7 +17,19 @@ namespace BlocksBeyondTheStars.Client
     {
         public GameBootstrap Game;
         public Camera Camera;
-        public bool ReducedEffects;
+        private bool _reducedEffects;
+
+        /// <summary>Updates the live emission rate as well as the stored preference. <see cref="WorldRig"/>
+        /// assigns this after <see cref="Awake"/>, so a plain field would leave the initial full rate cached.</summary>
+        public bool ReducedEffects
+        {
+            get => _reducedEffects;
+            set
+            {
+                _reducedEffects = value;
+                _baseRate = value ? 5f : 15f;
+            }
+        }
 
         private ParticleSystem _ps;
         private Transform _dust;     // the particle object (a child — moved independently of the shared root)

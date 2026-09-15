@@ -16,6 +16,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
     {
         _MainTex ("Atlas", 2D) = "white" {}
         _NormalTex ("Normal", 2D) = "bump" {}
+        _SurfaceTex ("Roughness / Metal / Emission / Height", 2D) = "black" {}
+        _SurfaceMapsEnabled ("Authored surfaces", Float) = 0
         _LeafCutoff ("Leaf alpha cutoff", Range(0,1)) = 0.5
     }
 
@@ -44,6 +46,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
 
             TEXTURE2D(_MainTex);   SAMPLER(sampler_MainTex);
             TEXTURE2D(_NormalTex); SAMPLER(sampler_NormalTex);
+            TEXTURE2D(_SurfaceTex); SAMPLER(sampler_SurfaceTex);
+            float _SurfaceMapsEnabled;
 
             // Globals fed by Sky/player via Shader.SetGlobal* — kept outside any per-material cbuffer.
             float4 _Sc_Light;
@@ -55,6 +59,7 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
             float4 _Sc_LampColor;
             float  _Sc_Indoor;
             float4 _Sc_FloraTint;
+            float  _Sc_FloraGlowScale;
             float  _LeafCutoff;
 
             struct Attributes
@@ -148,7 +153,9 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     // tint resolver carry black there and keep the planet's uniform global hue.
                     float3 tint = dot(i.leaf.yzw, float3(1, 1, 1)) > 0.01 ? i.leaf.yzw : _Sc_FloraTint.rgb;
                     float lum = dot(albedo, float3(0.299, 0.587, 0.114));
-                    albedo = lerp(albedo, lum * tint * 1.6, 0.85);
+                    // Flora is a selective accent in the art direction, not a second emissive signal. Keep the
+                    // seeded species hue, but pull its value back so Veyl cyan and functional lights own the frame.
+                    albedo = lerp(albedo, lum * tint * 1.15, 0.72);
                 }
 
                 float3 light = (_Sc_Light.a < 0.5) ? float3(1, 1, 1) : _Sc_Light.rgb;
@@ -183,9 +190,12 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                 float nightFloor = saturate(0.6 - dot(light, float3(0.299, 0.587, 0.114)));
                 col += albedo * float3(0.10, 0.13, 0.20) * (sky * nightFloor) * faceAo;
 
-                float gloss = i.mat.r;            // perceptual smoothness (0 = matte .. 1 = mirror)
-                float metal = i.mat.g;            // metallic (0 = dielectric .. 1 = metal)
-                float rough = clamp(1.0 - gloss, 0.045, 1.0);
+                float4 surface = SAMPLE_TEXTURE2D(_SurfaceTex, sampler_SurfaceTex, i.uv);
+                float authored = step(0.49, surface.a) * saturate(_SurfaceMapsEnabled);
+                float rough = clamp(lerp(1.0 - i.mat.r, surface.r, authored), 0.08, 1.0);
+                float gloss = 1.0 - rough;
+                float metal = lerp(i.mat.g, surface.g, authored);
+                float emissionMask = lerp(1.0, surface.b, authored);
 
                 // Specular: Unity's stable GGX form (no NaN at low roughness), tinted by the metallic F0
                 // (0.04 dielectric → albedo for metals). Tight, bright glints on smooth/metal faces feed the bloom.
@@ -241,7 +251,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     float veins = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin((lw.x + lw.y) * 0.55 + lt * 1.1) + slab * 0.3);
                     lavaGlow = clamp(1.0 + 0.7 * slab + 0.9 * veins, 0.2, 2.2);
                 }
-                col += albedo * i.mat.a * (3.0 * lavaGlow); // HDR overdrive: push emitters past white so ACES + bloom give a real glow
+                float floraEmissionScale = (i.skyl.y > 0.5 && i.skyl.y < 1.5) ? _Sc_FloraGlowScale : 1.0;
+                col += albedo * i.mat.a * floraEmissionScale * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
 
                 // Placed coloured lights (flood-filled per-vertex, TEXCOORD3): illuminate this surface in
                 // their colour, regardless of sun/skylight, so lamps light caves + night builds. The baked
@@ -358,7 +369,9 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
             #include "UnityCG.cginc"
 
             sampler2D _MainTex;
-            sampler2D _NormalTex; // tangent-space normal map (Sobel-derived from the atlas)
+            sampler2D _NormalTex;
+            sampler2D _SurfaceTex;
+            float _SurfaceMapsEnabled;
             fixed4 _Sc_Light;   // system sun colour x day brightness x weather (a>0.5 = set)
             float4 _Sc_SunDir;  // world-space direction TO the sun
             fixed4 _Sc_Sky;     // sky colour for environment reflections
@@ -367,6 +380,7 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
             fixed4 _Sc_LampColor; // headlamp: rgb colour*intensity, a = enabled
             float _Sc_Indoor;     // ship-interior fill (0..1): lights skylight-occluded cabin faces
             fixed4 _Sc_FloraTint; // planet flora base hue (rgb); flora faces are desaturated + re-tinted to it
+            float _Sc_FloraGlowScale;
             float _LeafCutoff;    // alpha-test threshold for cutout foliage (leaf tiles carry a baked alpha mask)
 
             struct appdata
@@ -451,7 +465,9 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                 {
                     float3 tint = dot(i.leaf.yzw, float3(1, 1, 1)) > 0.01 ? i.leaf.yzw : _Sc_FloraTint.rgb;
                     float lum = dot(albedo, float3(0.299, 0.587, 0.114));
-                    albedo = lerp(albedo, lum * tint * 1.6, 0.85);
+                    // Flora is a selective accent in the art direction, not a second emissive signal. Keep the
+                    // seeded species hue, but pull its value back so Veyl cyan and functional lights own the frame.
+                    albedo = lerp(albedo, lum * tint * 1.15, 0.72);
                 }
 
                 fixed3 light = (_Sc_Light.a < 0.5) ? fixed3(1, 1, 1) : _Sc_Light.rgb;
@@ -496,9 +512,12 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                 float nightFloor = saturate(0.6 - dot(light, fixed3(0.299, 0.587, 0.114)));
                 col += albedo * fixed3(0.10, 0.13, 0.20) * (sky * nightFloor) * faceAo;
 
-                float gloss = i.mat.r;            // perceptual smoothness
-                float metal = i.mat.g;            // metallic
-                float rough = clamp(1.0 - gloss, 0.045, 1.0);
+                float4 surface = tex2D(_SurfaceTex, i.uv);
+                float authored = step(0.49, surface.a) * saturate(_SurfaceMapsEnabled);
+                float rough = clamp(lerp(1.0 - i.mat.r, surface.r, authored), 0.08, 1.0);
+                float gloss = 1.0 - rough;
+                float metal = lerp(i.mat.g, surface.g, authored);
+                float emissionMask = lerp(1.0, surface.b, authored);
 
                 // Specular sun highlight: Unity's stable GGX form, tinted by the metallic F0 (0.04 dielectric →
                 // albedo for metals). Tight, bright glints on smooth/metal faces; gated by ndl + skylight.
@@ -556,7 +575,8 @@ Shader "BlocksBeyondTheStars/BlockAtlas"
                     float veins = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin((lw.x + lw.y) * 0.55 + lt * 1.1) + slab * 0.3);
                     lavaGlow = clamp(1.0 + 0.7 * slab + 0.9 * veins, 0.2, 2.2);
                 }
-                col += albedo * i.mat.a * (3.0 * lavaGlow); // HDR overdrive: push emitters past white so ACES + bloom give a real glow
+                float floraEmissionScale = (i.skyl.y > 0.5 && i.skyl.y < 1.5) ? _Sc_FloraGlowScale : 1.0;
+                col += albedo * i.mat.a * floraEmissionScale * emissionMask * (lerp(3.0, 2.2, authored) * lavaGlow); // Only authored light apertures emit; ceramic housings remain legible.
 
                 // Placed coloured lights (flood-filled per-vertex, TEXCOORD3): illuminate this surface in
                 // their colour, regardless of sun/skylight, so lamps light caves + night builds. The baked

@@ -79,9 +79,8 @@ public sealed partial class GameServer
                 rec.Origin.X + cell.X + 0.5f, rec.Origin.Y + cell.Y, rec.Origin.Z + cell.Z + 0.5f));
         }
 
-        rec.HealTank = s.MedbayCell is { } mb
-            ? new Vector3f(rec.Origin.X + mb.X + 0.5f, rec.Origin.Y + mb.Y + 1f, rec.Origin.Z + mb.Z + 0.5f)
-            : new Vector3f(rec.Origin.X + s.Width / 2 + 0.5f, rec.Origin.Y + 1f, rec.Origin.Z + s.Length / 2 + 0.5f);
+        var spawn = ShipSpawnLocal(s);
+        rec.HealTank = new Vector3f(rec.Origin.X + spawn.X, rec.Origin.Y + spawn.Y, rec.Origin.Z + spawn.Z);
 
         CleanLegacyStampResidueOnce(rec, pad); // pre-object saves carry the old stamped hull as world block edits
 
@@ -92,6 +91,38 @@ public sealed partial class GameServer
 
         BroadcastToWorld(LandedShipMessage(playerId, rec, removed: false));
         RegisterDoors(); // pick up the ship's doors (+ keep settlement/other-ship doors in sync)
+    }
+
+    /// <summary>Authored spawns stand beside furniture. Recheck player edits and choose the nearest clear
+    /// floor cell; a completely filled cabin falls back to its clear landing-pad approach. Legacy hulls
+    /// retain their original medical anchor and coordinates.</summary>
+    private Vector3f ShipSpawnLocal(SpaceStructure s)
+    {
+        if (s.SpawnCell is { } preferred)
+        {
+            Vector3i? best = null;
+            int distance = int.MaxValue;
+            for (int x = 1; x < s.Width - 1; x++)
+                for (int z = 1; z < s.Length - 1; z++)
+                {
+                    var p = new Vector3i(x, preferred.Y, z);
+                    if (_content.BlockById(s.Get(p + new Vector3i(0, -1, 0))) is not { Solid: true }
+                        || !s.Get(p).IsAir || !s.Get(p + new Vector3i(0, 1, 0)).IsAir
+                        || !s.Get(p + new Vector3i(0, 2, 0)).IsAir) continue;
+                    int d = p.DistanceSquared(preferred);
+                    if (d >= distance) continue;
+                    best = p;
+                    distance = d;
+                }
+
+            return best is { } clear
+                ? new Vector3f(clear.X + 0.5f, clear.Y, clear.Z + 0.5f)
+                : new Vector3f(s.Width / 2f, 0f, -2f);
+        }
+
+        return s.MedbayCell is { } mb
+            ? new Vector3f(mb.X + 0.5f, mb.Y + 1f, mb.Z + 0.5f)
+            : new Vector3f(s.Width / 2 + 0.5f, 1f, s.Length / 2 + 0.5f);
     }
 
     /// <summary>Removes a player's parked ship from the active world (launch into space / logout) and tells
@@ -148,6 +179,18 @@ public sealed partial class GameServer
 
         if (!removed)
         {
+            var owner = FindSessionByPlayerId(ownerId);
+            var dock = s.StationCells.FirstOrDefault(station => station.Type == "workshop");
+            if (owner is not null && !string.IsNullOrEmpty(owner.ActiveShipId)
+                && owner.State.Milestones.Contains(SurveySpecimenKey(owner.ActiveShipId)) && dock.Type is not null)
+            {
+                msg.HasVeylSpecimen = true;
+                // Structure-local dock coordinates inherit the ship's world placement and presentation pose.
+                msg.SpecimenX = dock.Cell.X + 0.5f;
+                msg.SpecimenY = dock.Cell.Y + 1f;
+                msg.SpecimenZ = dock.Cell.Z + 0.5f;
+                msg.SpecimenYaw = s.StationYaws.TryGetValue(dock.Cell, out int yaw) ? yaw : 0;
+            }
             int n = s.Cells.Count;
             msg.X = new int[n]; msg.Y = new int[n]; msg.Z = new int[n]; msg.Block = new ushort[n];
             // Modifier arrays only when the design carries dye/glow/shape (authored ships) — plain hulls stay compact.
@@ -263,11 +306,19 @@ public sealed partial class GameServer
                 X = s.Pos.X,
                 Y = s.Pos.Y,
                 Z = s.Pos.Z,
+                Yaw = ShipStationYaw(s.Pos),
             }).ToArray(),
         });
     }
 
     private List<(string Type, Vector3f Pos)> _stations => CurLanded.Stations;
+
+    private int ShipStationYaw(Vector3f position)
+    {
+        var cell = CurLanded.ToLocal(new Vector3i((int)System.Math.Floor(position.X),
+            (int)System.Math.Floor(position.Y), (int)System.Math.Floor(position.Z)), _world.Circumference);
+        return CurLanded.Structure.StationYaws.TryGetValue(cell, out int yaw) ? yaw : 0;
+    }
 
     /// <summary>Test/diagnostic: the world position of a ship station, or null if absent.</summary>
     public Vector3f? StationPosition(string type)
@@ -441,10 +492,11 @@ public sealed partial class GameServer
             }
 
             var s = rec.Structure;
-            double dx = WorldConstants.WrapDeltaX(p.X - rec.Origin.X, _world.Circumference); // longitude wraps
+            double dx = WorldConstants.WrapDeltaX(p.X - rec.Origin.X, _world.Circumference);
+            double dz = WorldConstants.WrapDeltaZ(p.Z - rec.Origin.Z, _world.Circumference);
             if (dx >= 0 && dx <= s.Width
                 && p.Y >= rec.Origin.Y && p.Y <= rec.Origin.Y + s.Height + 1
-                && p.Z >= rec.Origin.Z && p.Z <= rec.Origin.Z + s.Length)
+                && dz >= 0 && dz <= s.Length)
             {
                 return true;
             }

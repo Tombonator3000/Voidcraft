@@ -145,7 +145,7 @@ public sealed class GameContent
     private IReadOnlyDictionary<string, StoryDefinition> _stories =
         new Dictionary<string, StoryDefinition>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Installed story packs, keyed by id (e.g. "vega_protocol"). The active story per save is one of
+    /// <summary>Installed story packs, keyed by id (e.g. "voidcraft_awakening"). The active story per save is one of
     /// these (or "none"); the engine is story-agnostic, so adding a storyline is adding a pack.</summary>
     public IReadOnlyDictionary<string, StoryDefinition> Stories => _stories;
 
@@ -200,7 +200,7 @@ public sealed class GameContent
         _stories = dict;
     }
 
-    /// <summary>The default story pack ("vega_protocol" if installed, else the first, else the built-in).</summary>
+    /// <summary>The default story pack (the registry default if installed, else the first, else the built-in).</summary>
     public StoryDefinition DefaultStory
         => _stories.TryGetValue(StoryRegistry.DefaultStoryId, out var d)
             ? d

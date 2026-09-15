@@ -59,6 +59,26 @@ public sealed class ServerConfigTests
     }
 
     [Fact]
+    public void ApplyCommandLine_EnablesBundledHostOpeningGuarantees()
+    {
+        var config = new ServerConfig();
+        var applied = config.ApplyCommandLine(new[]
+        {
+            "--guarantee-start-cube", "true",
+            "--guarantee-start-fragment", "true",
+        });
+
+        Assert.True(config.GuaranteeStartDataCube);
+        Assert.True(config.GuaranteeStartStoryFragment);
+        Assert.Contains("guarantee-start-cube", applied);
+        Assert.Contains("guarantee-start-fragment", applied);
+
+        var dedicated = new ServerConfig();
+        Assert.False(dedicated.GuaranteeStartDataCube);
+        Assert.False(dedicated.GuaranteeStartStoryFragment);
+    }
+
+    [Fact]
     public void ApplyCommandLine_RejectsInvalidChunkStreamValues()
     {
         var config = new ServerConfig();

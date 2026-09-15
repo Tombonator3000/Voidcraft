@@ -21,6 +21,9 @@ namespace BlocksBeyondTheStars.Client
         public Vector3i Origin;       // world cell of the structure-local origin (0,0,0)
         public int Hull;              // owner hull paint (0xRRGGBB; 0 = default steel)
         public int Width, Height, Length;
+        public bool HasVeylSpecimen;
+        public Vector3 SpecimenDock; // structure-local; moves with the ship across the world seam
+        public int SpecimenYaw;
         public readonly Dictionary<Vector3i, BlockId> Cells = new();
 
         /// <summary>Authored per-voxel dye/glow (0xRRGGBB each) + packed shape+orientation, parallel to
@@ -173,6 +176,25 @@ namespace BlocksBeyondTheStars.Client
             if (m.Cells.Count == 0 || Game.ChunkMaterial == null || Game.Atlas == null || Game.Content == null)
             {
                 return;
+            }
+
+            if (m.HasVeylSpecimen)
+            {
+                // Keep the shared equipment mesh below an empty dock: chunk cleanup owns only fresh meshes.
+                var dock = new GameObject("Veyl specimen dock");
+                dock.transform.SetParent(root.transform, false);
+                dock.transform.localPosition = m.SpecimenDock;
+                dock.transform.localRotation = Quaternion.Euler(0f, m.SpecimenYaw, 0f);
+                // Local station decor already supplies the owner's table. Observers need the same dock.
+                if (m.OwnerId != Game.LocalPlayerId)
+                {
+                    var marker = new Vector3i(Mathf.FloorToInt(m.SpecimenDock.x),
+                        Mathf.FloorToInt(m.SpecimenDock.y) - 1, Mathf.FloorToInt(m.SpecimenDock.z));
+                    m.Shapes.TryGetValue(marker, out int markerShape);
+                    bool cased = StationDecorView.UsesMarkerCasing("workshop", Game.Content.BlockById(m.Get(marker))?.Key, markerShape);
+                    StationDecorView.BuildFixture(dock.transform, "workshop", cased);
+                }
+                StationDecorView.BuildSurveySpecimen(dock.transform);
             }
 
             var mats = Game.ChunkMaterialTransparent != null

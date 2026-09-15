@@ -499,7 +499,7 @@ namespace BlocksBeyondTheStars.Client
         /// Cave reverb + underwater muffle are baked into the clip via <see cref="SampleKit"/> instead of
         /// filter components — Unity Web silently ignores AudioReverbFilter/AudioLowPassFilter (#878), the
         /// baked variant sounds the same on every platform.</summary>
-        public void At(string id, Vector3 pos, float pitch = 1f, float vol = 1f, bool echo = false)
+        public void At(string id, Vector3 pos, float pitch = 1f, float vol = 1f, bool echo = false, Transform owner = null)
         {
             if (!_clips.TryGetValue(id, out var clip) || clip == null)
             {
@@ -511,13 +511,13 @@ namespace BlocksBeyondTheStars.Client
                 clip = SampleKit.CaveReverb(clip);
             }
 
-            AtClip(clip, pos, pitch, vol, id);
+            AtClip(clip, pos, pitch, vol, id, owner);
         }
 
         /// <summary>Plays an already-resolved clip positionally — the path generated creature voices take,
         /// since their variant is baked ahead of time rather than looked up by name (#903). The underwater
         /// muffle still applies here, so a baked voice ducks under water like every other one-shot.</summary>
-        public void AtClip(AudioClip clip, Vector3 pos, float pitch = 1f, float vol = 1f, string label = "voice")
+        public void AtClip(AudioClip clip, Vector3 pos, float pitch = 1f, float vol = 1f, string label = "voice", Transform owner = null)
         {
             if (clip == null)
             {
@@ -531,6 +531,8 @@ namespace BlocksBeyondTheStars.Client
 
             var go = new GameObject("sfx_" + label);
             go.transform.position = pos;
+            // Optional short-effect owner cancels the one-shot on world reset and carries seam relocation.
+            if (owner != null) go.transform.SetParent(owner, true);
             var src = go.AddComponent<AudioSource>();
             src.clip = clip;
             src.spatialBlend = 1f;
@@ -618,6 +620,7 @@ namespace BlocksBeyondTheStars.Client
 
         private void OnBlockApplied(Vector3i pos, BlockId oldId, BlockId newId)
         {
+            if (oldId == newId) return; // Dye/glow updates are not mining or placement impacts.
             // Fluid-sim steps (#655): the server broadcasts EVERY spread/drain cell as a block change, so
             // flowing water used to hammer the place-knock (and draining water the mining crunch) several
             // times a second. Water/lava transitions play no per-cell cue — the looping fluid bed IS the
@@ -641,9 +644,18 @@ namespace BlocksBeyondTheStars.Client
                 : new Vector3(pos.X + 0.5f, pos.Y + 0.5f, pos.Z + 0.5f);
             if (newId.Value == 0)
             {
-                // Mined → a random material variant for variety (material-accurate later).
-                string[] v = { "mine_stone", "mine_metal", "mine_crystal", "mine_dirt" };
-                At(v[_rng.Next(v.Length)], at);
+                // Select a matching surface family; random metal clangs on soil obscure hit feedback.
+                var material = Game?.Content?.BlockById(oldId);
+                string cue;
+                if (oldKey.Contains("crystal") || oldKey.Contains("glass") || oldKey == "ice")
+                    cue = "mine_crystal";
+                else if (material?.Category == "flora" || oldKey is "dirt" or "mud" or "sand" or "snow" or "grass" or "ash")
+                    cue = "mine_dirt";
+                else if (material?.Metal >= 0.3f || material?.Category is "machine" or "door"
+                    || (BlockSurfaceLibrary.Contains(oldKey) && BlockSurfaceLibrary.Sample(oldKey, 0.43f, 0.57f).Metallic >= 0.3f))
+                    cue = "mine_metal";
+                else cue = "mine_stone";
+                At(cue, at);
             }
             else
             {

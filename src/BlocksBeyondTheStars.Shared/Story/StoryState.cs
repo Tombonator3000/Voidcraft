@@ -14,7 +14,7 @@ namespace BlocksBeyondTheStars.Shared.Story;
 /// </summary>
 public sealed class StoryState
 {
-    /// <summary>The active pack id this state belongs to (e.g. "vega_protocol").</summary>
+    /// <summary>The active pack id this state belongs to (e.g. "voidcraft_awakening").</summary>
     public string StoryId { get; set; } = string.Empty;
 
     /// <summary>Net fragments found across the save (the primary story driver).</summary>
