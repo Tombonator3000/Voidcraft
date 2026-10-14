@@ -7,12 +7,12 @@ using UnityEngine;
 namespace BlocksBeyondTheStars.Client
 {
     /// <summary>
-    /// Draws a short shell-turf layer on nearby grass TOP faces without changing chunk meshes or collision.
+    /// Draws a short, interactive shell-turf layer on nearby grass TOP faces without changing chunk meshes or
+    /// collision. A shared seeded biome mask paints sparse earth patches on the base grass and thins the lifted
+    /// shells above exactly the same places, so vegetation dissolves into soil instead of ending at a hard edge.
     ///
-    /// The controller deliberately re-draws only submesh 0 (opaque terrain) through a tiny clip shader. The shader
-    /// rejects every atlas tile except grass and every face except world-up tops, so transparent/paint submeshes,
-    /// ships and arbitrary scene meshes never receive turf. Medium uses two shells; High uses four. Low/Potato,
-    /// Reduced Effects, Built-in RP and space flight stay on the original voxel surface only.
+    /// The mask/wind/trampling approach is an original Unity/HLSL adaptation inspired by Christian Ortiz'
+    /// MIT-licensed stylized-components grass study; no Three.js/React source or assets are imported.
     /// </summary>
     public sealed class TerrainTurfController : MonoBehaviour
     {
@@ -22,6 +22,10 @@ namespace BlocksBeyondTheStars.Client
         private static readonly int ShellHeightId = Shader.PropertyToID("_ShellHeight");
         private static readonly int TurfTimeId = Shader.PropertyToID("_TurfTime");
         private static readonly int WindId = Shader.PropertyToID("_WindStrength");
+        private static readonly int BiomeSeedId = Shader.PropertyToID("_BiomeSeed");
+        private static readonly int PlayerPosId = Shader.PropertyToID("_PlayerPos");
+        private static readonly int TrampleRadiusId = Shader.PropertyToID("_TrampleRadius");
+        private static readonly int DirtStrengthId = Shader.PropertyToID("_DirtStrength");
 
         private static TerrainTurfController _instance;
 
@@ -33,7 +37,7 @@ namespace BlocksBeyondTheStars.Client
 
         private readonly List<ChunkDraw> _chunks = new List<ChunkDraw>(256);
         private readonly List<MeshRenderer> _scan = new List<MeshRenderer>(512);
-        private readonly List<Material> _layers = new List<Material>(4);
+        private readonly List<Material> _layers = new List<Material>(5);
 
         private GameBootstrap _game;
         private Camera _camera;
@@ -43,6 +47,7 @@ namespace BlocksBeyondTheStars.Client
         private bool _reduced;
         private bool _active;
         private float _range;
+        private float _trampleRadius;
         private float _nextSetup;
         private float _nextChunkScan;
 
@@ -131,22 +136,26 @@ namespace BlocksBeyondTheStars.Client
             Rect uv = _game.Atlas.TileUv(grass.NumericId.Value);
             Vector4 uvRect = new Vector4(uv.xMin, uv.yMin, uv.xMax, uv.yMax);
 
-            int count = preset == QualityPreset.High ? 4 : 2;
-            float height = preset == QualityPreset.High ? 0.12f : 0.065f;
-            _range = preset == QualityPreset.High ? 24f : 14f;
+            int shellCount = preset == QualityPreset.High ? 4 : 2;
+            float height = preset == QualityPreset.High ? 0.13f : 0.070f;
+            _range = preset == QualityPreset.High ? 25f : 15f;
+            _trampleRadius = preset == QualityPreset.High ? 1.35f : 1.05f;
 
-            for (int i = 1; i <= count; i++)
+            // Layer zero is flush with the block surface. It uses exactly the same biome mask as the lifted
+            // shells and softly earth-tints the holes they leave, giving one coherent grass -> dirt transition.
+            for (int i = 0; i <= shellCount; i++)
             {
                 var mat = new Material(_shader)
                 {
-                    name = $"TerrainTurf_{i}of{count}",
+                    name = i == 0 ? "TerrainTurf_GroundMask" : $"TerrainTurf_{i}of{shellCount}",
                     mainTexture = atlas,
                     renderQueue = 3000,
                 };
                 mat.SetVector(GrassUvId, uvRect);
                 mat.SetFloat(LayerIndexId, i);
-                mat.SetFloat(LayerCountId, count);
+                mat.SetFloat(LayerCountId, shellCount);
                 mat.SetFloat(ShellHeightId, height);
+                mat.SetFloat(DirtStrengthId, preset == QualityPreset.High ? 0.82f : 0.68f);
                 _layers.Add(mat);
             }
         }
@@ -186,10 +195,15 @@ namespace BlocksBeyondTheStars.Client
 
             float time = _game.WorldTime;
             float wind = Mathf.Clamp01(_game.WindSpeed);
+            float seed = StableSeed01(_game.WorldSeed, _game.LocationName);
+            Vector3 player = _game.PlayerPosition;
             foreach (var mat in _layers)
             {
                 mat.SetFloat(TurfTimeId, time);
                 mat.SetFloat(WindId, wind);
+                mat.SetFloat(BiomeSeedId, seed);
+                mat.SetVector(PlayerPosId, new Vector4(player.x, player.y, player.z, 1f));
+                mat.SetFloat(TrampleRadiusId, _trampleRadius);
             }
 
             Vector3 cameraPos = _camera.transform.position;
@@ -212,10 +226,24 @@ namespace BlocksBeyondTheStars.Client
                 int layer = chunk.Renderer.gameObject.layer;
                 foreach (var mat in _layers)
                 {
-                    // Submesh 0 is the opaque block terrain. Transparent glass/water and player-painted faces live
-                    // in later submeshes and therefore never pay the turf overdraw.
+                    // Submesh 0 is opaque terrain. Transparent water/glass and player paint never pay this overdraw.
                     Graphics.DrawMesh(mesh, matrix, mat, layer, _camera, 0);
                 }
+            }
+        }
+
+        private static float StableSeed01(long worldSeed, string location)
+        {
+            unchecked
+            {
+                ulong h = (ulong)worldSeed ^ 1469598103934665603UL;
+                foreach (char c in location ?? string.Empty)
+                {
+                    h ^= c;
+                    h *= 1099511628211UL;
+                }
+
+                return (h & 0xFFFFFFUL) / 16777215f;
             }
         }
 
